@@ -1,5 +1,16 @@
 # Changelog
 
+## [2026-09-29]
+
+### Added (Phase 4)
+- Secure HTTP probe foundation (`App\Services\Monitor\Probe`).
+- Runtime SSRF guard (`App\Services\Security\SsrfGuard`) validating DNS-resolved IPs before connecting and on every redirect hop.
+- Queue job `RunWebsiteCheck` and scheduler dispatch for due websites.
+- Migrations for `checks`, `website_baselines`, and `check_extractions` per `DATABASE.md`.
+- Models `Check`, `WebsiteBaseline`, `CheckExtraction`.
+- Console command `sentinel:check-website` for manual single-website checks.
+- Unit tests covering SSRF, DNS rebinding, IPv4/IPv6 private/loopback, redirect-to-private blocking, and probe response handling.
+
 All notable changes to **SiteSentinel — Website Monitoring & Security Alerts** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
