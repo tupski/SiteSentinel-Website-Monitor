@@ -23,6 +23,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // Redirect guests (login pages) back to login; authenticated users to the shell.
         $middleware->redirectGuestsTo(fn () => route('login'));
         $middleware->redirectUsersTo(fn () => route('admin.dashboard'));
+
+        // In testing, the array session driver does not persist the CSRF token
+        // across requests. CSRF protection remains active in all other envs.
+        if (env('APP_ENV') === 'testing') {
+            $middleware->validateCsrfTokens(except: ['/*']);
+        }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

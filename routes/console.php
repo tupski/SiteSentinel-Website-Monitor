@@ -13,15 +13,15 @@ Schedule::command('model:prune')->daily();
 
 // Phase 4: dispatch due website checks to the monitoring queue every minute.
 Schedule::call(function (): void {
-    $websites = Website::query()
+    Website::query()
         ->where('is_active', true)
         ->where(function ($query) {
-            $query->whereNull('last_checked_at')
-                ->orWhereColumn('last_checked_at', '<=', now()->subSeconds('check_interval_seconds'));
+            $query->whereNull('next_check_at')
+                ->orWhere('next_check_at', '<=', now());
         })
-        ->get();
-
-    foreach ($websites as $website) {
-        RunWebsiteCheck::dispatch($website);
-    }
+        ->chunkById(100, function ($websites) {
+            foreach ($websites as $website) {
+                RunWebsiteCheck::dispatch($website);
+            }
+        });
 })->everyMinute()->name('sitesentinel:dispatch-due-checks')->withoutOverlapping();

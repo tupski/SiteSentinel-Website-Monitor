@@ -7,6 +7,7 @@ namespace Tests\Feature\Auth;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
 use Tests\TestCase;
 
@@ -15,6 +16,17 @@ use Tests\TestCase;
  */
 final class LoginTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        foreach (['admin@example.test', 'nobody@example.test'] as $email) {
+            RateLimiter::clear("login:{$email}|127.0.0.1");
+            RateLimiter::clear("login:{$email}|127.0.0.1:soft");
+            RateLimiter::clear("login:{$email}|127.0.0.1:lockout");
+            RateLimiter::clear("login:{$email}|127.0.0.1:locked");
+        }
+    }
+
     use RefreshDatabase;
 
     public function test_admin_can_log_in_at_root(): void

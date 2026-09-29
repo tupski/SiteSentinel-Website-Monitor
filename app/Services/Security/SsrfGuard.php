@@ -9,9 +9,8 @@ use Illuminate\Validation\ValidationException;
 /**
  * Runtime SSRF/destination guard for outbound monitoring requests (PLAN.md Phase 4).
  *
- * This is the SECOND line of SSRF defence. It validates the actual destination
- * immediately before a connection is made, and re-validates every redirect hop.
- * It accepts an optional resolver/transport override for deterministic testing.
+ * This is the SECOND line of SSRF defence. It validates every resolved IP before
+ * a connection is made and re-validates every redirect hop.
  */
 final class SsrfGuard
 {
@@ -22,17 +21,27 @@ final class SsrfGuard
 
     private const BLOCKED_HOST_SUFFIXES = ['.localhost', '.local', '.internal'];
 
-    private const BLOCKED_PORTS = [22, 25, 3306, 6379];
+    private static function blockedPorts(): array
+    {
+        return config('sentinel.probe_limits.blocked_ports', [22, 25, 3306, 6379]);
+    }
 
     public static function setResolver(?callable $resolver): void
     {
         self::$resolver = $resolver;
     }
 
+    public static function getResolver(): ?callable
+    {
+        return self::$resolver;
+    }
+
     /**
      * Validate a candidate URL before connecting.
      *
-     * @return array{scheme:string, host:string, url:string}
+     * Returns all validated safe destination IPs plus the selected IP and rebuilt URL.
+     *
+     * @return array{scheme:string, host:string, url:string, selected_ip:string, valid_ips:list<string>}
      *
      * @throws ValidationException
      */
@@ -60,7 +69,7 @@ final class SsrfGuard
         }
 
         $port = isset($parsed['port']) ? (int) $parsed['port'] : null;
-        if ($port !== null && in_array($port, self::BLOCKED_PORTS, true)) {
+        if ($port !== null && in_array($port, self::blockedPorts(), true)) {
             self::reject('Destination port is not allowed.');
         }
 
@@ -68,14 +77,20 @@ final class SsrfGuard
 
         if (self::isLiteralIp($host)) {
             self::validateLiteralIp($host);
+            $ips = [self::stripBrackets($host)];
+            $selectedIp = reset($ips);
         } else {
             self::validateHostname($host);
+            $ips = self::resolve($host);
+            $selectedIp = self::chooseIp($ips);
         }
 
         return [
             'scheme' => $scheme,
             'host' => $host,
             'url' => self::rebuildUrl($scheme, $host, $port, $parsed['path'] ?? '', $parsed['query'] ?? ''),
+            'selected_ip' => $selectedIp,
+            'valid_ips' => $ips,
         ];
     }
 
@@ -83,6 +98,40 @@ final class SsrfGuard
     {
         $ipv6 = str_contains($ip, ':');
         self::checkBlockedRanges($ip, $ipv6);
+    }
+
+    public static function isAllowedIp(string $ip): bool
+    {
+        try {
+            self::validateIp($ip);
+
+            return true;
+        } catch (ValidationException $e) {
+            return false;
+        }
+    }
+
+    private static function chooseIp(array $ips): string
+    {
+        foreach ($ips as $ip) {
+            try {
+                self::validateIp($ip);
+
+                return $ip;
+            } catch (ValidationException $e) {
+                continue;
+            }
+        }
+        self::reject('No safe destination IP found.');
+    }
+
+    private static function stripBrackets(string $host): string
+    {
+        if (str_starts_with($host, '[') && str_ends_with($host, ']')) {
+            return mb_substr($host, 1, -1);
+        }
+
+        return $host;
     }
 
     private static function reject(string $message): void
@@ -145,11 +194,6 @@ final class SsrfGuard
 
         if (! preg_match('/^[a-z0-9\\-.]+$/', $host)) {
             self::reject('Invalid hostname characters.');
-        }
-
-        $ips = self::resolve($host);
-        foreach ($ips as $ip) {
-            self::validateIp($ip);
         }
     }
 
@@ -227,7 +271,12 @@ final class SsrfGuard
     private static function resolve(string $hostname): array
     {
         if (self::$resolver !== null) {
-            return (self::$resolver)($hostname);
+            $resolved = (self::$resolver)($hostname);
+            if (! is_array($resolved) || $resolved === []) {
+                self::reject('Could not resolve destination hostname.');
+            }
+
+            return $resolved;
         }
 
         $records = @dns_get_record($hostname, DNS_A + DNS_AAAA);

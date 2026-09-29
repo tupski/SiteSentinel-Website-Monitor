@@ -63,6 +63,9 @@ return [
 
         // Allowed URL schemes for monitored targets (SECURITY §5.3)
         'allowed_schemes' => ['http', 'https'],
+
+        // Blocked destination ports (SECURITY §5) — applied to initial URL and redirects.
+        'blocked_ports' => [22, 25, 3306, 6379],
     ],
 
     'scoring' => [

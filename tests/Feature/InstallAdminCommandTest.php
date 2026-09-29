@@ -67,6 +67,9 @@ final class InstallAdminCommandTest extends TestCase
 
     public function test_no_default_password_seeder_creates_admins(): void
     {
+        // Ensure a previous test's data is not leaking into this assertion.
+        User::query()->delete();
+
         // The database seeder must NOT create admin accounts with known
         // passwords (PLAN.md Phase 2 risk note).
         Artisan::call('db:seed', ['--force' => true]);

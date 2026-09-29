@@ -2,6 +2,21 @@
 
 ## [2026-09-29]
 
+### Fixed (Phase 4 remediation)
+- Runtime SSRF guard now validates and selects a safe destination IP for every hop.
+- HTTP probe pins the validated IP using `CURLOPT_RESOLVE` so the actual connection cannot be redirected by a later DNS rebinding attack.
+- Removed separate `stream_socket_client` SSL inspection that bypassed SSRF validation; SSL metadata is captured from the same pinned connection.
+- Added `checks.resolved_ip` migration/model/persistence.
+- Implemented per-website Redis-backed lock in `RunWebsiteCheck` to prevent overlapping checks.
+- Implemented deterministic `check_key` based on website and minute.
+- Implemented first-success baseline creation in `website_baselines`.
+- Fixed scheduler to use `next_check_at` for due-website dispatch.
+- Enforced response body size limit by rejecting bodies exceeding `max_response_body_bytes`.
+- Expanded SSRF/probe tests: DNS rebinding, mixed IPs, redirect to private/blocked port, redirect limit, oversized response, DNS failure.
+- Fixed test-suite regressions related to CSRF/session driver and rate-limiter state leakage.
+
+## [2026-09-29]
+
 ### Added (Phase 4)
 - Secure HTTP probe foundation (`App\Services\Monitor\Probe`).
 - Runtime SSRF guard (`App\Services\Security\SsrfGuard`) validating DNS-resolved IPs before connecting and on every redirect hop.

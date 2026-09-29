@@ -47,6 +47,7 @@ final class SsrfGuardTest extends TestCase
         SsrfGuard::setResolver(fn () => ['1.2.3.4']);
         $result = SsrfGuard::validate($url);
         $this->assertNotNull($result['host']);
+        $this->assertSame('1.2.3.4', $result['selected_ip']);
     }
 
     #[DataProvider('invalidUrlProvider')]
@@ -69,6 +70,7 @@ final class SsrfGuardTest extends TestCase
         SsrfGuard::setResolver(fn () => ['1.2.3.4']);
         $result = SsrfGuard::validate('https://public.example.test/');
         $this->assertSame('public.example.test', $result['host']);
+        $this->assertSame('1.2.3.4', $result['selected_ip']);
     }
 
     public function test_ipv4_mapped_ipv6_loopback_is_blocked(): void
@@ -76,5 +78,19 @@ final class SsrfGuardTest extends TestCase
         SsrfGuard::setResolver(fn () => ['::ffff:127.0.0.1']);
         $this->expectException(ValidationException::class);
         SsrfGuard::validate('https://mapped.example.test/');
+    }
+
+    public function test_multiple_resolved_ips_all_validated(): void
+    {
+        SsrfGuard::setResolver(fn () => ['1.2.3.4', '1.2.3.5']);
+        $result = SsrfGuard::validate('https://multi.example.test/');
+        $this->assertSame(['1.2.3.4', '1.2.3.5'], $result['valid_ips']);
+    }
+
+    public function test_mixed_resolved_ips_select_only_public(): void
+    {
+        SsrfGuard::setResolver(fn () => ['1.2.3.4', '127.0.0.1']);
+        $result = SsrfGuard::validate('https://mixed.example.test/');
+        $this->assertSame('1.2.3.4', $result['selected_ip']);
     }
 }

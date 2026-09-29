@@ -11,6 +11,7 @@ final readonly class ProbeResult
         public ?int $httpStatus = null,
         public ?int $durationMs = null,
         public ?string $finalUrl = null,
+        public ?string $resolvedIp = null,
         public int $redirectCount = 0,
         public ?bool $sslValid = null,
         public ?string $sslIssuer = null,

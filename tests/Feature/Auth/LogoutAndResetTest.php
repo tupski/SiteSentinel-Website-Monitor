@@ -6,9 +6,11 @@ namespace Tests\Feature\Auth;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -19,6 +21,17 @@ use Tests\TestCase;
  */
 final class LogoutAndResetTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        RateLimiter::clear('login:admin@example.test|127.0.0.1');
+        RateLimiter::clear('login:admin@example.test|127.0.0.1:soft');
+        RateLimiter::clear('login:admin@example.test|127.0.0.1:lockout');
+        RateLimiter::clear('login:admin@example.test|127.0.0.1:locked');
+        RateLimiter::clear('password-reset:127.0.0.1');
+        Cache::flush();
+    }
+
     use RefreshDatabase;
 
     public function test_logout_invalidates_the_session_and_regenerates_csrf(): void
@@ -65,8 +78,8 @@ final class LogoutAndResetTest extends TestCase
 
         User::factory()->create(['email' => 'admin@example.test']);
 
-        $known = $this->post('/password-reset', ['email' => 'admin@example.test']);
-        $unknown = $this->post('/password-reset', ['email' => 'nobody@example.test']);
+        $known = $this->from('/')->post('/password-reset', ['email' => 'admin@example.test']);
+        $unknown = $this->from('/')->post('/password-reset', ['email' => 'nobody@example.test']);
 
         $known->assertSessionHas('status');
         $unknown->assertSessionHas('status');
@@ -89,7 +102,7 @@ final class LogoutAndResetTest extends TestCase
         ]);
 
         // 1. Request a reset link
-        $this->post('/password-reset', ['email' => 'admin@example.test']);
+        $this->from('/')->post('/password-reset', ['email' => 'admin@example.test']);
         Mail::assertSentCount(1);
 
         // 2. The stored token is hashed at rest (§2.9), so the test mints a
