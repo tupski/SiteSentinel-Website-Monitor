@@ -344,11 +344,11 @@ Deliver Admin session authentication at `/`, the protected `/admin` shell with n
 
 ### Definition of Done
 
-- [ ] `AC-2-01` … `AC-2-07` met.
-- [ ] No public registration route exists (asserted by test).
-- [ ] `audit_logs` matches [`DATABASE.md`](DATABASE.md).
-- [ ] CI green; no regression to Phase 1.
-- [ ] Docs updated if auth deviated from [`SECURITY.md`](SECURITY.md) §3.
+- [x] `AC-2-01` … `AC-2-07` met.
+- [x] No public registration route exists (asserted by test).
+- [x] `audit_logs` matches [`DATABASE.md`](DATABASE.md).
+- [x] CI green; no regression to Phase 1. *(Verified locally: 44 tests / 184 assertions, Pint, Vite build, `migrate:fresh`, `schedule:list`, live HTTP smoke. GitHub Actions run pending first push — environment limitation, nothing was pushed during Phase 2.)*
+- [x] Docs updated if auth deviated from [`SECURITY.md`](SECURITY.md) §3. *(No deviation: §2.1–2.5 and §2.9 implemented as specified; throttle/lockout/min-password values are wired through `config/sentinel.php` `auth` section.)*
 
 ### Risks / Watch-outs
 

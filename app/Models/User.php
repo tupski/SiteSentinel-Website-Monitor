@@ -28,7 +28,29 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'last_login_at' => 'datetime',
+            'is_active' => 'boolean',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Whether the account may authenticate and act (SECURITY.md §3.1).
+     *
+     * Note: `role` and `is_active` are deliberately NOT mass-assignable
+     * (PHP attribute Fillable above); authorization state changes go
+     * through explicit audited admin flows only.
+     */
+    public function isActive(): bool
+    {
+        return (bool) $this->is_active;
+    }
+
+    /**
+     * Whether the account holds the admin role (SECURITY.md §3.1).
+     */
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
-use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -14,14 +13,13 @@ class DatabaseSeeder extends Seeder
 
     /**
      * Seed the application's database.
+     *
+     * Deliberately does NOT create admin accounts (PLAN.md Phase 2:
+     * "Seeding an Admin with a known default password is a security defect").
+     * Admins are provisioned out of band via `sentinel:install-admin`.
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        // No seeds at this phase. Admin provisioning: php artisan sentinel:install-admin
     }
 }

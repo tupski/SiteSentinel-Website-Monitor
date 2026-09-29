@@ -103,9 +103,21 @@ return [
     ],
 
     'auth' => [
-        // Login throttling parameters (SECURITY §3.3, PRD FR-06)
+        // Login throttling parameters (SECURITY §2.4, PRD FR-06)
         'max_login_attempts' => (int) env('SENTINEL_MAX_LOGIN_ATTEMPTS', 5),
-        'lockout_window_minutes' => (int) env('SENTINEL_LOCKOUT_WINDOW_MINUTES', 15),
+
+        // Soft-limit window in minutes: max_login_attempts failures within
+        // this window are throttled with HTTP 429 (SECURITY §2.4)
+        'soft_limit_window_minutes' => (int) env('SENTINEL_SOFT_LIMIT_WINDOW_MINUTES', 15),
+
+        // Lockout: after this many failures within lockout_window_minutes,
+        // the identity is locked for lockout_duration_minutes (SECURITY §2.4)
+        'lockout_threshold' => (int) env('SENTINEL_LOCKOUT_THRESHOLD', 10),
+        'lockout_window_minutes' => (int) env('SENTINEL_LOCKOUT_WINDOW_MINUTES', 30),
+        'lockout_duration_minutes' => (int) env('SENTINEL_LOCKOUT_DURATION_MINUTES', 15),
+
+        // Minimum password length in characters (SECURITY §2.3)
+        'min_password_length' => (int) env('SENTINEL_MIN_PASSWORD_LENGTH', 12),
 
         // Session timeout parameters in minutes (SECURITY §3.4)
         'idle_timeout_minutes' => (int) env('SENTINEL_IDLE_TIMEOUT_MINUTES', 30),

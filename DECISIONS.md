@@ -589,6 +589,56 @@ cannot verify the Redis-backed queue path.
 
 ---
 
+## ADR-023: Admin provisioning via install command; no registration, no default-password seeder
+
+**Status** — Accepted (Phase 2)
+
+**Context** — [`PLAN.md`](PLAN.md) Phase 2 requires admin account provisioning while `SECURITY.md` §2.3
+and `PRD.md` §15.3 mandate that no public registration route exists, and the phase's risk notes flag
+"seeding an Admin with a known default password" as a security defect. A decision was needed on how the
+first admin account comes into existence.
+
+**Decision** — Admins are provisioned **out of band** via `php artisan sentinel:install-admin`
+(interactive hidden password prompt or explicit `--password` for scripted installs; minimum length from
+`config/sentinel.auth.min_password_length`; refuses duplicate emails; writes an `auth.admin_provisioned`
+row to `audit_logs`). `DatabaseSeeder` seeds **nothing**. There is no `register` route, controller, or
+view. The Laravel test suite uses `UserFactory` exclusively — factories are test tooling, not a runtime
+provisioning path.
+
+**Consequences** — *Positive:* no enumeration surface, no default credentials can ever leak, provisioning
+is audited by construction. *Negative:* first-run deployment requires one manual artisan command (documented
+in the release runbook, Phase 10); scripted environments must pass `--password` through a secret store, not
+the command line history.
+
+**Related** — [`PLAN.md`](PLAN.md) Phase 2; [`SECURITY.md`](SECURITY.md) §2.3, §2.4; [`PRD.md`](PRD.md) §15.3; ADR-018.
+
+---
+
+## ADR-024: Login lockout implemented as a dedicated RateLimiter lock marker
+
+**Status** — Accepted (Phase 2)
+
+**Context** — `SECURITY.md` §2.4 distinguishes a soft limit (5 failures / 15 min → HTTP 429) from a
+lockout (10 failures / 30 min → identity locked for exactly 15 minutes). A naive implementation reuses
+the failure counter's decay window as the lock duration, which would release the lock after 30 minutes
+(the window) instead of 15 (the specified duration), or couple the lock to counter arithmetic.
+
+**Decision** — `LoginController` keeps three `RateLimiter` keys per throttle key (`email|ip`): `:soft`
+(failure counter, 15-min decay), `:lockout` (failure counter, 30-min decay), and `:locked` (a lock marker
+hit once with the configured `lockout_duration_minutes` decay). The marker is armed when the `:lockout`
+counter crosses `sentinel.auth.lockout_threshold`; while the marker exists all attempts get 429 with
+`availableIn` reporting the true remaining lock time. Successful login clears all three keys
+(§2.4 "Reset"). All values come from `config/sentinel.php` `auth` — no magic numbers in the controller.
+
+**Consequences** — *Positive:* lock semantics match the spec exactly and are tunable without code changes.
+*Negative:* one extra cache key per throttle key; the counters keep counting during a lock (harmless —
+attempts are rejected before credential verification).
+
+**Related** — [`PLAN.md`](PLAN.md) Phase 2; [`SECURITY.md`](SECURITY.md) §2.4; ADR-022 (cache store: Redis in
+production, `array`/database in local tests).
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions

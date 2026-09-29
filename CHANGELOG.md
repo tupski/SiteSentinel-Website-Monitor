@@ -86,6 +86,25 @@ Nothing in this release should be interpreted as implemented functionality. All 
 - `.gitignore` — ignore local SQLite database files.
 - `README.md` — updated project status and local bootstrap instructions.
 
+### Added — Phase 2 (Authentication & Admin Shell)
+
+- Session login at `/` (`app/Http/Controllers/Auth/LoginController.php`) with the `SECURITY.md` §2.4 throttle model — soft limit 5 failures/15 min and lockout after 10 failures/30 min locking the identity for 15 min, keyed on `email` + source IP, HTTP 429 on throttled attempts, generic failure messaging for enumeration resistance, counters cleared on success, session ID regenerated on login (fixation defence), `last_login_at` stamped (AC-2-01).
+- `/admin` authorization scaffold (`app/Http/Middleware/EnsureAdmin.php`): authenticated → `is_active` → `role = 'admin'`, enforced for every HTTP method; disabled accounts get their session invalidated and a 403 (AC-2-02).
+- No public registration route anywhere — asserted by test; admin accounts are provisioned out of band via `php artisan sentinel:install-admin` (hidden password prompt, ≥ 12 chars from `config/sentinel.auth.min_password_length`, refuses duplicates, writes an `auth.admin_provisioned` audit row). `DatabaseSeeder` seeds nothing — no default-password admin (AC-2-03).
+- Logout (`FR-07`): destroys the server-side `sessions` row, invalidates the store entry, regenerates the CSRF token, audited (AC-2-04).
+- Password reset flow (`app/Http/Controllers/Auth/PasswordResetController.php`, `App\Mail\PasswordResetMail` plain-text mailable): 30-minute single-use tokens hashed at rest in `password_reset_tokens`, identical response for known/unknown emails, all other sessions invalidated on completion, audited request/failed/completed events (AC-2-05).
+- Audit foundation: `audit_logs` table per `DATABASE.md` §3.19 (indexes `idx_audit_logs_user_id`, `idx_audit_logs_event_created_at`, `idx_audit_logs_created_at`; `created_at` only — rows are immutable), `App\Models\AuditLog`, and `App\Services\Audit\AuditLogger` as the single write path (best-effort: an audit failure is reported and never breaks the action being audited). Auth events audited with actor + timestamp + IP (AC-2-06).
+- Admin shell: `resources/views/components/admin-layout.blade.php` (header nav + logout form) and `resources/views/admin/dashboard.blade.php` placeholder with Availability and Security & Content Health as two structurally separate sections (`aria-labelledby` anchors), Turbo-friendly (CSRF meta + Vite assets) (AC-2-07).
+
+### Changed — Phase 2
+
+- `routes/web.php` — `/` is now the login page (guest group), `/password-reset*` guest routes, `POST /logout` authed, `/admin` group under `auth` + `admin` middleware aliases; `/health` contract unchanged.
+- `bootstrap/app.php` — registered the `admin` middleware alias and guest/user redirect targets.
+- `app/Models/User.php` — `Fillable`/`Hidden` PHP attributes (`role`/`is_active` deliberately not mass-assignable), `isActive()`/`isAdmin()` helpers, `last_login_at`/`is_active` casts.
+- `database/factories/UserFactory.php` — `role`/`is_active` defaults + `inactive()` state; `database/seeders/DatabaseSeeder.php` — no longer seeds a user.
+- `config/sentinel.php` — `auth` section expanded to the full `SECURITY.md` §2.4 model (soft-limit window, lockout threshold/window/duration, min password length); `.env.example` — corresponding `SENTINEL_*` auth keys documented.
+- `phpunit.xml` — suite unchanged (`array` session driver); the session-row contract is exercised per-test by switching to the real `database` driver.
+
 ### Planned
 
 Implementation proceeds through the phases defined in [`PLAN.md`](PLAN.md):
