@@ -520,6 +520,41 @@ cleanup policy.
 
 ---
 
+## ADR-021: Phase 0 bootstrap — scaffold deferred to Phase 1
+
+**Status** — Accepted
+
+**Context** — [`PLAN.md`](PLAN.md) Phase 0 requires a decision: run `composer create-project`
+Laravel 13 immediately, or establish only the repository foundation (container topology,
+`config/sentinel.php`, coding standards, CI skeleton) and defer the framework scaffold to Phase 1.
+The repository was docs-only at Phase 0 start.
+
+**Decision** — **Defer the Laravel scaffold to Phase 1.** Phase 0 delivers only
+`config/sentinel.php` (keys/values, no logic), `docker-compose.yml` plus `docker/` build files,
+`.env.example`, `pint.json`, `.editorconfig`, and the CI skeleton. No vendor code, no framework
+bootstrap, no migrations. Phase 1 runs `composer create-project` for Laravel 13 on PHP 8.4+ and
+wires the framework onto this foundation.
+
+**Alternatives considered** — Scaffolding now (rejected for Phase 0: it pulls the full vendor tree
+and framework defaults into a phase whose scope is explicitly "no application business code",
+blurring the phase boundary and making AC-0 verification harder); committing a scaffold without
+`vendor/` but with framework files (rejected — creates a half-state where CI must already understand
+Laravel before Phase 1 exists); a manual micro-framework bootstrap (rejected — contradicts ADR-001).
+
+**Reason** — Keeping Phase 0 vendor-free gives a clean, reviewable foundation commit, keeps CI green
+without an application ("no tests yet" is explicit, not a silent pass), and lets Phase 1 begin from
+a known-good `composer create-project` baseline rather than a hand-assembled hybrid.
+
+**Consequences** — *Positive:* sharp phase boundary; no framework lock-in baked in before the
+topology is reviewed; CI runs trivially on a docs-plus-config repo. *Negative:* `config/sentinel.php`
+cannot be integration-tested through a booted framework until Phase 1 (Phase 0 covers it with a
+plain-PHP load check in CI); the compose topology is validated by inspection + `docker compose
+config` rather than a live bring-up.
+
+**Related** — [`PLAN.md`](PLAN.md) Phase 0, Phase 1; ADR-001; [`ARCHITECTURE.md`](ARCHITECTURE.md) §13.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions

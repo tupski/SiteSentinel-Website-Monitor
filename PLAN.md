@@ -156,12 +156,12 @@ None. No migrations are created in this phase.
 
 ### Definition of Done
 
-- [ ] Acceptance criteria `AC-0-01` … `AC-0-06` met.
-- [ ] CI skeleton green.
-- [ ] `config/sentinel.php` skeleton committed.
-- [ ] Scaffold-now-vs-later decision recorded in [`DECISIONS.md`](DECISIONS.md).
-- [ ] Docs updated if any topology decision deviated from [`ARCHITECTURE.md`](ARCHITECTURE.md) §13.
-- [ ] No monitoring logic introduced.
+- [x] Acceptance criteria `AC-0-01` … `AC-0-06` met.
+- [x] CI skeleton green (lint stage validates PHP syntax and the `config/sentinel.php` load check; test stage explicitly reports "no tests yet" pending Phase 1).
+- [x] `config/sentinel.php` skeleton committed.
+- [x] Scaffold-now-vs-later decision recorded in [`DECISIONS.md`](DECISIONS.md) (ADR-021 — scaffold deferred to Phase 1).
+- [x] Docs updated if any topology decision deviated from [`ARCHITECTURE.md`](ARCHITECTURE.md) §13 (no deviation: `docker-compose.yml` matches ADR-017 / §13 exactly).
+- [x] No monitoring logic introduced.
 
 ### Risks / Watch-outs
 

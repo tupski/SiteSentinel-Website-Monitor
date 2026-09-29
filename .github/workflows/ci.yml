@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint:
+    name: Lint & Coding Standards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, intl, pdo, pdo_mysql, redis
+          coverage: none
+
+      - name: Validate composer.json
+        run: |
+          if [ -f "composer.json" ]; then
+            composer validate --strict
+          else
+            echo "composer.json not present in Phase 0 (scaffold deferred to Phase 1 per ADR-021)."
+          fi
+
+      - name: Check PHP syntax
+        run: |
+          find . -name "*.php" -not -path "./vendor/*" -exec php -l {} +
+
+      - name: Run Pint (if installed)
+        run: |
+          if [ -f "vendor/bin/pint" ]; then
+            ./vendor/bin/pint --test
+          else
+            echo "Laravel Pint not installed yet (composer dependencies deferred to Phase 1)."
+          fi
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, intl, pdo, pdo_mysql, redis
+          coverage: none
+
+      - name: Run Test Suite
+        run: |
+          if [ -f "vendor/bin/phpunit" ] || [ -f "vendor/bin/pest" ]; then
+            php artisan test
+          else
+            echo "Test suite note: No application tests present in Phase 0 (bootstrap only). Full test framework to be wired in Phase 1."
+          fi
+
+      - name: Validate Sentinel Configuration
+        run: |
+          php -r '
+            // ADR-021: framework is deferred to Phase 1, so env() is polyfilled for this standalone check.
+            if (!function_exists("env")) {
+                function env($key, $default = null) { return getenv($key) ?: $default; }
+            }
+            $config = require "config/sentinel.php";
+            if (!is_array($config)) {
+                echo "Sentinel config failed to load array\n";
+                exit(1);
+            }
+            $required = ["monitoring", "probe_limits", "scoring", "notifications", "retention", "auth"];
+            foreach ($required as $section) {
+                if (!array_key_exists($section, $config)) {
+                    echo "Missing required section: $section\n";
+                    exit(1);
+                }
+            }
+            // Documented defaults from PRD.md / SECURITY.md / NOTIFICATIONS.md / DATABASE.md
+            $expectations = [
+                ["monitoring", "default_interval_seconds", 300],
+                ["monitoring", "default_timeout_seconds", 10],
+                ["probe_limits", "max_redirect_hops", 5],
+                ["scoring", "threshold_info", 1],
+                ["scoring", "threshold_warning", 8],
+                ["scoring", "threshold_critical", 15],
+                ["scoring", "correlation_guard_min_categories", 2],
+                ["notifications", "default_cooldown_minutes", 15],
+                ["retention", "checks_days", 30],
+                ["retention", "incidents_days", 365],
+                ["retention", "notification_logs_days", 90],
+                ["retention", "snapshots_days", 14],
+                ["auth", "max_login_attempts", 5],
+            ];
+            foreach ($expectations as [$section, $key, $expected]) {
+                $actual = $config[$section][$key] ?? null;
+                if ($actual !== $expected) {
+                    echo "Default mismatch: $section.$key = " . var_export($actual, true) . " (expected $expected)\n";
+                    exit(1);
+                }
+            }
+            echo "Sentinel config validated: sections + documented defaults OK.\n";
+          '

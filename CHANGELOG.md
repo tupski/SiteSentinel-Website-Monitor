@@ -55,19 +55,22 @@ Nothing in this release should be interpreted as implemented functionality. All 
 
 ### Added
 
-- _(nothing yet)_
+- Phase 0 — Repository & Architecture Bootstrap ([`PLAN.md`](PLAN.md)):
+  - `config/sentinel.php` — configuration skeleton exposing retention (`checks` 30/60/90 default 30, `incidents` 365, `notification_logs` 90, `snapshots` 14), check defaults (interval 5 min, timeout 10 s), probe limits (connect 5 s, redirects cap 5, body 2 MB), scoring thresholds (`INFO` >= 1, `WARNING` >= 8, `CRITICAL` >= 15, correlation guard 2), notification cooldown (15 min), and auth throttle values — sourced from `PRD.md`, `SECURITY.md`, `NOTIFICATIONS.md`, `DETECTION-RULES.md`. Keys/values only, no logic (AC-0-02).
+  - `docker-compose.yml` — services `nginx`, `app` (php-fpm), `scheduler`, `worker`, `mysql`, `redis`; persistent volumes for MySQL, Redis, and app storage; only Nginx exposed to the host; scheduler/worker out of the web request path per `ARCHITECTURE.md` §13 (AC-0-03).
+  - `docker/app/Dockerfile` (PHP 8.4-fpm-alpine with pdo_mysql, redis, intl, mbstring, bcmath, pcntl) and `docker/nginx/default.conf`.
+  - `.github/workflows/ci.yml` — CI skeleton with lint and test stages, explicit about the absence of an application test suite rather than silently passing (AC-0-04).
+  - `pint.json` (Laravel Pint, PSR-12 base, `declare(strict_types=1)`) and `.editorconfig` (AC-0-05).
+  - `.env.example` — documented placeholder keys only, no secret values (AC-0-06).
+  - `README.md` — developer bootstrap pointer and project status.
+  - `.gitignore` — Laravel/Vendor/IDE/OS baseline including `storage/app/snapshots/`.
+- `DECISIONS.md` ADR-021 — Phase 0 bootstrap decision: Laravel scaffold deferred to Phase 1 (AC-0-01).
+- `CONSISTENCY-AUDIT.md` — documentation-set consistency audit (17 findings fixed, 4 verified-no-issue).
 
 ### Changed
 
-- _(nothing yet)_
-
-### Fixed
-
-- _(nothing yet)_
-
-### Security
-
-- _(nothing yet)_
+- `PLAN.md` — Phase 0 Definition of Done checkboxes ticked after verification.
+- `DECISIONS.md` — ADR-021 appended; ADR-017 (Compose topology) referenced unchanged, `docker-compose.yml` matches it.
 
 ### Planned
 
