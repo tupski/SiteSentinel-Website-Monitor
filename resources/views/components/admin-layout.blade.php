@@ -14,7 +14,8 @@
                 <a href="{{ route('admin.dashboard') }}" class="text-lg font-bold tracking-tight">SiteSentinel</a>
                 <nav class="flex items-center gap-4 text-sm">
                     <a href="{{ route('admin.dashboard') }}" class="text-slate-600 hover:text-slate-900">{{ __('Dashboard') }}</a>
-                    {{-- Navigation for later phases (websites, incidents, settings) lands here. --}}
+                    <a href="{{ route('admin.websites.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Websites') }}</a>
+                    {{-- Navigation for later phases (incidents, settings) lands here. --}}
                 </nav>
             </div>
             <form method="POST" action="{{ route('logout') }}">

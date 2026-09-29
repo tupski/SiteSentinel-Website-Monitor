@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordResetController;
@@ -31,4 +32,8 @@ Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth')->
 // NOTE: no registration route exists anywhere (AC-2-03).
 Route::prefix('admin')->name('admin.')->middleware(['auth', 'admin'])->group(function (): void {
     Route::get('/', AdminDashboardController::class)->name('dashboard');
+
+    // Phase 3: monitored website CRUD
+    Route::resource('websites', WebsiteController::class)->except(['show']);
+    Route::post('websites/{website}/toggle', [WebsiteController::class, 'toggle'])->name('websites.toggle');
 });
