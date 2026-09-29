@@ -23,8 +23,12 @@ yarn-error.log
 /.vscode
 /.zed
 
-# Snapshots captured by the monitoring engine (retention-pruned at runtime)
+# SiteSentinel snapshot artifacts (retention-pruned at runtime)
 /storage/app/snapshots/
+
+# Local development SQLite database (canonical production DB is MySQL 8)
+/database/*.sqlite
+/database/*.sqlite-journal
 
 # OS artifacts
 .DS_Store

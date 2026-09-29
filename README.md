@@ -19,14 +19,31 @@ The repository specifications are documented in detail:
 
 ## Project Status
 
-- **Current Phase**: Phase 0 Complete (`Repository & Architecture Bootstrap`).
-- **Next Phase**: Phase 1 (`Application Foundation` — Laravel 13 framework scaffold on PHP 8.4+).
+- **Current Phase**: Phase 1 Complete (`Application Foundation` — Laravel 13 scaffold, queue/scheduler, Turbo + Tailwind, health endpoint).
+- **Next Phase**: Phase 2 (`Authentication & Admin Shell`).
 
 ## Tech Stack
 
 - **Backend**: Laravel 13 (PHP 8.4+)
-- **Database**: MySQL 8 (InnoDB, utf8mb4)
-- **Cache & Queue**: Redis (phpredis)
+- **Database**: MySQL 8 (InnoDB, utf8mb4) — canonical production. Local development uses SQLite as a temporary convenience (ADR-022).
+- **Cache & Queue**: Redis (`predis` client; swappable via `REDIS_CLIENT`)
 - **Frontend**: Server-rendered Blade + Hotwired Turbo + Tailwind CSS (Alpine.js only where necessary)
 - **Web Server**: Nginx + PHP-FPM
 - **Orchestration**: Docker Compose
+
+## Local Bootstrap (native PHP, no Docker)
+
+```bash
+composer install
+cp .env.example .env            # then set DB_CONNECTION=sqlite for local dev
+php artisan key:generate
+touch database/database.sqlite
+php artisan migrate
+npm install && npm run build
+php artisan serve
+```
+
+Health endpoint: `GET /health` — reports database, Redis, and queue status.
+
+> **Canonical production database is MySQL 8.** SQLite is a local-development convenience only
+> (see `DECISIONS.md` ADR-022). Do not deploy with SQLite.

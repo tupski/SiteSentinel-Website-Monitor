@@ -67,10 +67,24 @@ Nothing in this release should be interpreted as implemented functionality. All 
 - `DECISIONS.md` ADR-021 — Phase 0 bootstrap decision: Laravel scaffold deferred to Phase 1 (AC-0-01).
 - `CONSISTENCY-AUDIT.md` — documentation-set consistency audit (17 findings fixed, 4 verified-no-issue).
 
-### Changed
+### Added — Phase 1 (Application Foundation)
 
-- `PLAN.md` — Phase 0 Definition of Done checkboxes ticked after verification.
-- `DECISIONS.md` — ADR-021 appended; ADR-017 (Compose topology) referenced unchanged, `docker-compose.yml` matches it.
+- Laravel 13.33 application scaffold on PHP 8.4 (framework tables, bootstrap, providers) per `PLAN.md` Phase 1 and ADR-021.
+- `users` migration aligned to the frozen schema in `DATABASE.md` §3.1 (`role` default `admin`, `is_active` default 1, `last_login_at`); `password_reset_tokens`/`sessions` per §3.2–3.3; framework tables `jobs`, `failed_jobs`, `cache`, `cache_locks` per §8 order (AC-1-01).
+- Redis wired as queue + cache driver (`predis` client); scheduler registered and visible via `schedule:list` (AC-1-02, AC-1-03).
+- Hotwired Turbo + Tailwind CSS 4 + Alpine.js wired through Vite; base layout `resources/views/layouts/app.blade.php` with CSRF meta; production asset build verified via `npm run build` (AC-1-04).
+- `/health` readiness endpoint (`app/Http/Controllers/HealthController.php`) reporting database, Redis, and queue status; secret-leak regression test included (AC-1-05).
+- Safe 404/500 error pages; test asserts no stack traces or framework paths leak with `APP_DEBUG=false` (AC-1-06).
+- Test suite (PHPUnit 12, 17 tests): base migrations vs frozen schema, queue round-trip through a real `queue:work` worker, health-endpoint contract, scheduler wiring, sentinel config defaults, error-page safety, asset manifest.
+- `.github/workflows/ci.yml` expanded to Laravel reality: lint (Pint), test (SQLite + database queue in CI), and asset-build jobs.
+- `DECISIONS.md` ADR-022 — local development environment: native PHP/SQLite/Predis, canonical production unchanged (MySQL 8 + Redis + Docker Compose).
+
+### Changed — Phase 1
+
+- `.env.example` — real runtime keys with SQLite local-development guidance; MySQL stays the documented default; `REDIS_CLIENT=predis`.
+- `config/database.php` — default Redis client `phpredis` → `predis` (pure-PHP, no extension requirement; swappable via `REDIS_CLIENT`).
+- `.gitignore` — ignore local SQLite database files.
+- `README.md` — updated project status and local bootstrap instructions.
 
 ### Planned
 

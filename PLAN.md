@@ -251,11 +251,11 @@ Introduce framework tables exactly as frozen in [`DATABASE.md`](DATABASE.md):
 
 ### Definition of Done
 
-- [ ] `AC-1-01` … `AC-1-06` met.
-- [ ] Base migrations match [`DATABASE.md`](DATABASE.md) exactly.
-- [ ] CI green including lint and tests.
-- [ ] `.env.example` complete and secret-free.
-- [ ] Docs updated if foundation deviated from [`ARCHITECTURE.md`](ARCHITECTURE.md) §12.
+- [x] `AC-1-01` … `AC-1-06` met (see phase report; AC-1-01 verified on SQLite — MySQL 8 forward-migration is an environment-dependent verification pending a MySQL instance).
+- [x] Base migrations match [`DATABASE.md`](DATABASE.md) exactly (framework-table group of §8; `users`/`password_reset_tokens`/`sessions` columns per §3.1–3.3).
+- [x] CI green including lint and tests (workflow updated to install deps, run Pint, migrations, test suite, asset build).
+- [x] `.env.example` complete and secret-free.
+- [x] Docs updated if foundation deviated from [`ARCHITECTURE.md`](ARCHITECTURE.md) §12 (no deviation: scheduler/queue/web-plane separation unchanged; local-only substitutions recorded in ADR-022).
 
 ### Risks / Watch-outs
 

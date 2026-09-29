@@ -555,6 +555,40 @@ config` rather than a live bring-up.
 
 ---
 
+## ADR-022: Local development environment — native PHP, SQLite, Predis
+
+**Status** — Accepted
+
+**Context** — Docker is not installed on the development machine, and no local MySQL server is
+available. Phase 1 requires a runnable application and executable verification
+([`PLAN.md`](PLAN.md) Phase 1 tests). Redis is available as a local native binary.
+
+**Decision** — Local development and testing run on **native PHP (8.4) + SQLite
+(`database/database.sqlite`) + Redis via the pure-PHP `predis` client**. The canonical production
+stack is **unchanged: MySQL 8 (InnoDB, utf8mb4) + Redis + Docker Compose**
+(ADR-003, ADR-004, ADR-017, [`ARCHITECTURE.md`](ARCHITECTURE.md) §13). `docker-compose.yml`,
+`docker/`, and the MySQL default in `.env.example` remain authoritative for production. CI runs
+tests on SQLite with the database queue driver because CI hosts have no MySQL/Redis services;
+this is a CI environment substitution, not a stack change.
+
+**Alternatives considered** — Installing Docker/MySQL locally (rejected — explicitly out of scope
+for this machine), switching the canonical database to SQLite (rejected — contradicts the canonical
+spec and `ADR-003`), using `phpredis` locally (rejected — the extension is absent; `predis` is
+pure-PHP and swappable via `REDIS_CLIENT`).
+
+**Reason** — The application and migrations stay portable (Laravel schema builder targets both
+engines), verification is executable everywhere, and the production architecture is not weakened.
+
+**Consequences** — *Positive:* every Phase 1 acceptance criterion is verifiable locally; no
+container dependency. *Negative:* MySQL-specific schema behaviour (e.g. `ENUM` columns stored as
+`VARCHAR`, collation) is **not** exercised locally and must be verified against a real MySQL 8
+instance before production — tracked as an explicit environment limitation in phase reports; CI
+cannot verify the Redis-backed queue path.
+
+**Related** — [`PLAN.md`](PLAN.md) Phase 1; ADR-003, ADR-004, ADR-017; [`DATABASE.md`](DATABASE.md) §8.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions
