@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
@@ -94,6 +95,14 @@ final class Website extends Model
             'next_check_at' => 'datetime',
             'locked_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Active baseline for this website.
+     */
+    public function currentBaseline(): BelongsTo
+    {
+        return $this->belongsTo(WebsiteBaseline::class, 'current_baseline_id');
     }
 
     /**

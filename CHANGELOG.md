@@ -2,6 +2,20 @@
 
 ## [2026-09-29]
 
+### Added (Phase 5)
+- Detection engine (`App\Services\Detection\RuleEngine`) implementing the two-dimensional availability/security classification, weighted scoring, and correlation guard from `DETECTION-RULES.md`.
+- `detection_rules` registry migration and model, seeded with all 36 canonical `RULE-xx` entries via `DetectionRuleSeeder`.
+- Per-website rule overrides (`website_rule_settings`) respected for `enabled`, `weight_override`, and `ignored_keywords`.
+- Snapshot persistence (`snapshots` migration/model + `SnapshotWriter`) capturing HTML body and headers when a check reaches `SUSPECT`/`INCIDENT`.
+- Baseline-relative comparison: content hash drift, title change, structural size change, and external-domain delta against `website_baselines`.
+- Content/keyword/link/SEO rule evaluation gated by `monitor_content`/`monitor_security`; availability rules always run; content rules skipped when `availability_state = DOWN` with no body.
+- Correlation guard enforced: a single category cannot produce `INCIDENT`; `>= 2` independent categories required.
+- Integration of detection into `RunWebsiteCheck`: persists `security_state`, `score`, and capture snapshots for elevated states.
+- Extraction fields added to `ProbeResult`/`Probe` (keywords, external domains, suspicious patterns) and baseline columns `response_size_bytes`/`external_domains`.
+- Fixture-driven unit tests for clean content, hash drift, guard capping, cross-category incident, down-check content short-circuit, and ignored-keyword suppression.
+
+## [2026-09-29]
+
 ### Fixed (Phase 4 remediation)
 - Runtime SSRF guard now validates and selects a safe destination IP for every hop.
 - HTTP probe pins the validated IP using `CURLOPT_RESOLVE` so the actual connection cannot be redirected by a later DNS rebinding attack.

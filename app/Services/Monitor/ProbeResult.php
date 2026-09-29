@@ -22,5 +22,10 @@ final readonly class ProbeResult
         public ?string $errorType = null,
         public ?string $errorMessage = null,
         public ?array $redirectChain = null,
+        public ?string $body = null,
+        public array $headers = [],
+        public array $extractedKeywords = [],
+        public array $extractedDomains = [],
+        public array $suspiciousPatterns = [],
     ) {}
 }

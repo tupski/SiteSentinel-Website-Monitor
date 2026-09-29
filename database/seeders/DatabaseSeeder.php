@@ -20,6 +20,6 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // No seeds at this phase. Admin provisioning: php artisan sentinel:install-admin
+        $this->call(DetectionRuleSeeder::class);
     }
 }

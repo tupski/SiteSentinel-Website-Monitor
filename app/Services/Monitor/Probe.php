@@ -101,10 +101,16 @@ final class Probe
                 redirectCount: $hop,
                 sslValid: $this->extractSslInfo($response, $currentUrl)['valid'] ?? null,
                 sslIssuer: $this->extractSslInfo($response, $currentUrl)['issuer'] ?? null,
+                sslExpiresAt: $this->extractSslInfo($response, $currentUrl)['expires_at'] ?? null,
                 title: $this->extractTitle($body),
                 contentHash: hash('sha256', $body),
                 responseSizeBytes: $size,
                 redirectChain: $chain,
+                body: $body,
+                headers: $response->headers() ?? [],
+                extractedKeywords: $this->extractKeywords($body),
+                extractedDomains: $this->extractDomains($body, $currentUrl),
+                suspiciousPatterns: $this->extractSuspiciousPatterns($body),
             );
         }
     }
@@ -195,21 +201,70 @@ final class Probe
     {
         $message = $e->getMessage();
         if (str_contains($message, 'cURL error 28')) {
-            return $this->failure('TIMEOUT', 'Request timed out.');
+            return $this->failure('timeout', 'Request timed out.');
         }
         if (str_contains($message, 'cURL error 6')) {
-            return $this->failure('DNS_FAILURE', 'Could not resolve hostname.');
+            return $this->failure('dns_failure', 'Could not resolve hostname.');
         }
         if (str_contains($message, 'cURL error 7')) {
-            return $this->failure('CONNECTION_FAILURE', 'Connection failed.');
+            return $this->failure('connection_refused', 'Connection failed.');
         }
         if (str_contains($message, 'SSL') || str_contains($message, 'certificate')) {
-            return $this->failure('TLS_FAILURE', 'TLS/SSL error.');
+            return $this->failure('tls_handshake_failure', 'TLS/SSL error.');
         }
         if (str_contains($message, 'Maximum response size')) {
             return $this->failure('RESPONSE_TOO_LARGE', 'Response body exceeded limit.');
         }
 
         return $this->failure('REQUEST_ERROR', $message);
+    }
+
+    private function extractKeywords(string $body): array
+    {
+        $text = strtolower(strip_tags($body));
+        $tier1 = ['maxwin', 'rtp slot', 'situs slot', 'togel', 'bandar', 'gacor', 'judi online', 'link alternatif', 'scatter hitam'];
+        $found = [];
+        foreach ($tier1 as $kw) {
+            if (str_contains($text, $kw)) {
+                $found[] = $kw;
+            }
+        }
+
+        return $found;
+    }
+
+    private function extractDomains(string $body, string $baseUrl): array
+    {
+        $domains = [];
+        $baseHost = parse_url($baseUrl, PHP_URL_HOST);
+        if (preg_match_all('/href=["\'](https?:\/\/[^"\']+)["\']/i', $body, $matches)) {
+            foreach ($matches[1] as $url) {
+                $host = parse_url($url, PHP_URL_HOST);
+                if ($host && $host !== $baseHost) {
+                    $domains[] = $host;
+                }
+            }
+        }
+
+        return array_values(array_unique($domains));
+    }
+
+    private function extractSuspiciousPatterns(string $body): array
+    {
+        $patterns = [];
+        $text = strtolower(strip_tags($body));
+        $doorway = ['daftar', 'link alternatif', 'login', 'situs slot', 'maxwin'];
+        foreach ($doorway as $kw) {
+            if (str_contains($text, $kw)) {
+                $patterns['doorway'] = true;
+                break;
+            }
+        }
+
+        if (str_contains($body, 'display:none') || str_contains($body, 'visibility:hidden')) {
+            $patterns['hidden_elements'] = true;
+        }
+
+        return $patterns;
     }
 }
