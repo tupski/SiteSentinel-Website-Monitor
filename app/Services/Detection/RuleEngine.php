@@ -655,6 +655,17 @@ final class RuleEngine
 
         $guardCapped = false;
 
+        // A per-website `threshold_override` moves the band boundaries for this
+        // website before classification (§6.9). It can raise or lower them, but
+        // it never bypasses the correlation guard: that is applied afterwards and
+        // remains authoritative (§6.3, ADR-009).
+        [$infoThreshold, $warningThreshold, $criticalThreshold] = $this->applyThresholdOverride(
+            $website,
+            $infoThreshold,
+            $warningThreshold,
+            $criticalThreshold,
+        );
+
         if ($score < $infoThreshold) {
             $state = 'OK';
         } elseif ($score < $warningThreshold) {
@@ -668,8 +679,6 @@ final class RuleEngine
             $state = 'SUSPECT';
             $guardCapped = true;
         }
-
-        $state = $this->applyThresholdOverride($website, $state, $score, $infoThreshold, $warningThreshold);
 
         return new DetectionResult(
             availabilityState: $check->availability_state ?? 'DOWN',
@@ -728,34 +737,54 @@ final class RuleEngine
      * SUSPECT boundary only — the correlation guard remains authoritative, so a
      * lowered override can never let a single category reach INCIDENT (§6.3).
      */
-    private function applyThresholdOverride(Website $website, string $state, int $score, int $infoThreshold, int $warningThreshold): string
-    {
-        unset($website, $infoThreshold);
+    /**
+     * Shift the classification band boundaries for one website (§6.9, FR-46).
+     *
+     * storage is rule-scoped, so the website-wide override is the smallest
+     * positive value present across the website's rule settings. It is applied
+     * as a delta from the canonical warning boundary, which preserves the shape
+     * of the bands: `info`, `warning` and `critical` all move by the same amount.
+     *
+     * `null`, zero and negative values are ignored and fall back to the canonical
+     * configured thresholds. The correlation guard is not affected here; it is
+     * applied after classification and remains authoritative.
+     *
+     * @return array{0: int, 1: int, 2: int} [info, warning, critical]
+     */
+    private function applyThresholdOverride(
+        Website $website,
+        int $infoThreshold,
+        int $warningThreshold,
+        int $criticalThreshold,
+    ): array {
+        unset($website);
 
         $override = null;
         foreach ($this->settings as $setting) {
-            if ($setting->threshold_override === null) {
+            $value = $setting->threshold_override;
+            if ($value === null || (int) $value <= 0) {
                 continue;
             }
-            $value = (int) $setting->threshold_override;
-            if ($value > 0) {
-                $override = $override === null ? $value : min($override, $value);
-            }
+            $override = $override === null ? (int) $value : min($override, (int) $value);
         }
 
-        // No lowered boundary, or the base banding already applied it.
-        if ($override === null || $override <= 0 || $override >= $warningThreshold) {
-            return $state;
+        if ($override === null) {
+            return [$infoThreshold, $warningThreshold, $criticalThreshold];
         }
 
-        // A lower SUSPECT boundary lifts scores that clear it into SUSPECT. The
-        // correlation guard is applied after this and remains authoritative, so
-        // INCIDENT can never be produced by a threshold override alone (§6.3).
-        if ($score >= $override && $state === 'INFO') {
-            return 'SUSPECT';
+        $delta = $override - $warningThreshold;
+
+        if ($delta === 0) {
+            return [$infoThreshold, $warningThreshold, $criticalThreshold];
         }
 
-        return $state;
+        // Move every boundary by the same delta and keep the bands ordered and
+        // non-negative so a misconfigured override can never invert them.
+        $info = max(1, $infoThreshold + $delta);
+        $warning = max($info, $warningThreshold + $delta);
+        $critical = max($warning, $criticalThreshold + $delta);
+
+        return [$info, $warning, $critical];
     }
 
     /*

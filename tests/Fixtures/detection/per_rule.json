@@ -1285,6 +1285,1271 @@
         "security_state": "SUSPECT",
         "guard_capped": false
       }
+    },
+    {
+      "id": "neg_av_001_200_ok",
+      "rule": "RULE-AV-001",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "2xx success is not a 5xx failure"
+    },
+    {
+      "id": "neg_av_002_expected_status",
+      "rule": "RULE-AV-002",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "200 equals the configured expected_status"
+    },
+    {
+      "id": "neg_av_003_no_timeout",
+      "rule": "RULE-AV-003",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "duration_ms": 900
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_av_004_resolved_dns",
+      "rule": "RULE-AV-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "duration_ms": 900
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_av_005_connected",
+      "rule": "RULE-AV-005",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "duration_ms": 900
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_av_006_fast_response",
+      "rule": "RULE-AV-006",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "duration_ms": 900
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "900ms is well under 80% of the 10s budget"
+    },
+    {
+      "id": "neg_ssl_001_valid_cert",
+      "rule": "RULE-SSL-001",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_ssl_002_matching_hostname",
+      "rule": "RULE-SSL-002",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_ssl_003_same_issuer",
+      "rule": "RULE-SSL-003",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "issuer matches the baseline issuer"
+    },
+    {
+      "id": "neg_ssl_004_far_expiry",
+      "rule": "RULE-SSL-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "90 days is outside the 30-day window"
+    },
+    {
+      "id": "neg_red_001_no_redirect",
+      "rule": "RULE-RED-001",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "redirect_chain": []
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_red_002_matching_domain",
+      "rule": "RULE-RED-002",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "redirect_chain": []
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "final domain equals the expected domain"
+    },
+    {
+      "id": "neg_red_003_reputable_tld",
+      "rule": "RULE-RED-003",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "redirect_chain": []
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_red_004_zero_hops",
+      "rule": "RULE-RED-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "redirect_chain": []
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_red_005_https_to_https",
+      "rule": "RULE-RED-005",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "redirect_chain": []
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "no http downgrade present"
+    },
+    {
+      "id": "neg_red_006_no_ssrf",
+      "rule": "RULE-RED-006",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP",
+        "redirect_chain": []
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_cnt_001_hash_unchanged",
+      "rule": "RULE-CNT-001",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_cnt_002_title_unchanged",
+      "rule": "RULE-CNT-002",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_cnt_003_size_stable",
+      "rule": "RULE-CNT-003",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "identical size is a 1.0 ratio, inside the 0.5-1.5 band"
+    },
+    {
+      "id": "neg_cnt_005_no_hidden_block",
+      "rule": "RULE-CNT-005",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_kw_001_no_tier1",
+      "rule": "RULE-KW-001",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "example": 2
+        },
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_kw_002_below_cluster",
+      "rule": "RULE-KW-002",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "togel": 1
+        },
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-KW-001"
+        ],
+        "score": 1,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "near miss for the rule under test; KW-001 fires as documented for a newly-present tier-1 term"
+    },
+    {
+      "id": "neg_kw_003_density_below_floor",
+      "rule": "RULE-KW-003",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "jackpot": 1
+        },
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "1 occurrence in 1000 chars is below the density floor"
+    },
+    {
+      "id": "neg_kw_004_no_title_keyword",
+      "rule": "RULE-KW-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "togel": 1
+        },
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-KW-001"
+        ],
+        "score": 1,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "near miss for the rule under test; KW-001 fires as documented for a newly-present tier-1 term"
+    },
+    {
+      "id": "neg_lnk_002_reputable_domain",
+      "rule": "RULE-LNK-002",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [
+          "example.org"
+        ],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "plain .org is not a suspicious TLD"
+    },
+    {
+      "id": "neg_lnk_003_link_count_normal",
+      "rule": "RULE-LNK-003",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "2 external domains is far below the link-farm threshold"
+    },
+    {
+      "id": "neg_lnk_004_visible_anchor",
+      "rule": "RULE-LNK-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [
+          "example.org"
+        ],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "anchor is not CSS-hidden"
+    },
+    {
+      "id": "neg_lnk_005_count_normal",
+      "rule": "RULE-LNK-005",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "mass-injection threshold not reached"
+    },
+    {
+      "id": "neg_seo_001_no_doorway",
+      "rule": "RULE-SEO-001",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_seo_004_no_script_injection",
+      "rule": "RULE-SEO-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "near miss: the documented trigger is absent"
+    },
+    {
+      "id": "neg_cnt_004_content_present",
+      "rule": "RULE-CNT-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "a normal 200 response with a full body is not an empty/unreachable page"
     }
   ]
 }

@@ -334,6 +334,35 @@ final class DetectionFixtureTest extends TestCase
         }
     }
 
+    public function test_every_evaluable_rule_has_a_targeted_negative_fixture(): void
+    {
+        $fired = [];
+        $negativeTargets = [];
+
+        foreach ($this->fixture['cases'] as $case) {
+            if ($case['kind'] === 'positive') {
+                foreach ($case['expect']['signals'] as $ruleId) {
+                    $fired[$ruleId] = true;
+                }
+            }
+            if ($case['kind'] === 'negative' && $case['rule'] !== 'none') {
+                $negativeTargets[$case['rule']] = true;
+            }
+        }
+
+        foreach (array_keys($fired) as $ruleId) {
+            if (in_array($ruleId, self::NON_FIRING_RULES, true)) {
+                continue;
+            }
+
+            $this->assertArrayHasKey(
+                $ruleId,
+                $negativeTargets,
+                "Rule [{$ruleId}] has no targeted negative/non-trigger fixture.",
+            );
+        }
+    }
+
     public function test_rule_coverage_map_targets_exist(): void
     {
         foreach (self::RULE_COVERAGE as $ruleId => $fixtureId) {
@@ -600,6 +629,104 @@ final class DetectionFixtureTest extends TestCase
         $this->assertSame(6, $result->score);
         $this->assertContains('content-keyword', self::categoriesOf($result), 'Carried signals must vote.');
         $this->assertContains('content-fingerprint', self::categoriesOf($result));
+    }
+
+    /**
+     * Explicit decay matrix (DETECTION-RULES 6.4).
+     *
+     * Each prior check carries its own signals at the canonical factor for its
+     * age: most-recent x0.5, two-back x0.25, three-back x0.125, nothing beyond.
+     */
+    public function test_decay_matrix_across_the_lookback_window(): void
+    {
+        $website = $this->website();
+
+        // One high-confidence KW-004 signal per prior check: 6 x 1.5 = 9 raw.
+        $priors = [];
+        foreach (['d3', 'd2', 'd1'] as $slug) {
+            $check = $this->makeCheck($website, [
+                'http_status' => 200, 'final_url' => 'https://example.com', 'title' => 'Example',
+                'content_hash' => hash('sha256', $slug), 'response_size_bytes' => 2000,
+                'ssl_valid' => true, 'ssl_expires_at' => '+90d',
+            ], $slug);
+            $check->forceFill([
+                'triggered_rules' => ['RULE-KW-004' => ['category' => 'content-keyword', 'weight' => 6, 'confidence' => 'high']],
+            ])->save();
+            $priors[$slug] = $check;
+        }
+
+        $current = $this->makeCheck($website, [
+            'http_status' => 200, 'final_url' => 'https://example.com', 'title' => 'Example',
+            'content_hash' => hash('sha256', 'cur'), 'response_size_bytes' => 2000,
+            'ssl_valid' => true, 'ssl_expires_at' => '+90d',
+        ], 'cur');
+
+        $window = Check::whereIn('id', [$priors['d3']->id, $priors['d2']->id, $priors['d1']->id])
+            ->orderByDesc('id')
+            ->get();
+
+        // --- current only (no priors): no signals at all -> 0 ---
+        $none = app(RuleEngine::class)->evaluate($website, $current, null, null, collect());
+        $this->assertSame(0, $none->score, 'current only');
+
+        // --- current + previous: round(9 x 0.5) = 5 ---
+        $oneBack = app(RuleEngine::class)->evaluate($website, $current, null, null, $window->take(1));
+        $this->assertSame(5, $oneBack->score, 'current + previous');
+
+        // --- + two-back: 5 + round(9 x 0.25) = 5 + 2 = 7 ---
+        $twoBack = app(RuleEngine::class)->evaluate($website, $current, null, null, $window->take(2));
+        $this->assertSame(7, $twoBack->score, 'current + previous + two-back');
+
+        // --- + three-back: 7 + round(9 x 0.125) = 7 + 1 = 8 ---
+        $threeBack = app(RuleEngine::class)->evaluate($website, $current, null, null, $window->take(3));
+        $this->assertSame(8, $threeBack->score, 'current + previous + two-back + three-back');
+
+        // --- beyond the window: a fourth prior check contributes nothing ---
+        $fourth = $this->makeCheck($website, [
+            'http_status' => 200, 'final_url' => 'https://example.com', 'title' => 'Example',
+            'content_hash' => hash('sha256', 'd4'), 'response_size_bytes' => 2000,
+            'ssl_valid' => true, 'ssl_expires_at' => '+90d',
+        ], 'd4');
+        $fourth->forceFill([
+            'triggered_rules' => ['RULE-KW-004' => ['category' => 'content-keyword', 'weight' => 6, 'confidence' => 'high']],
+        ])->save();
+
+        $fourPriors = Check::whereIn('id', [$fourth->id, $priors['d3']->id, $priors['d2']->id, $priors['d1']->id])
+            ->orderByDesc('id')
+            ->get()
+            ->take(4);
+
+        // The engine takes only the window; seeding a 4th must not change the score.
+        $beyond = app(RuleEngine::class)->evaluate($website, $current, null, null, $fourPriors->take(3));
+        $this->assertSame(8, $beyond->score, 'beyond retention window ignored');
+
+        // --- same-category carry collapses to one category ---
+        $this->assertSame(1, count(self::categoriesOf($threeBack)), 'same-category carry must not multiply categories');
+
+        // --- cross-category carry votes for each distinct category ---
+        // Two-back becomes a content-fingerprint signal worth 1 x 0.5 = 1 raw,
+        // so the score changes while the category set gains a second entry.
+        $priors['d2']->forceFill([
+            'triggered_rules' => ['RULE-CNT-001' => ['category' => 'content-fingerprint', 'weight' => 1, 'confidence' => 'low']],
+        ])->save();
+
+        $crossWindow = Check::whereIn('id', [$priors['d3']->id, $priors['d2']->id, $priors['d1']->id])
+            ->orderByDesc('id')
+            ->get();
+
+        $cross = app(RuleEngine::class)->evaluate($website, $current, null, null, $crossWindow);
+        $categories = self::categoriesOf($cross);
+        sort($categories);
+        $this->assertSame(['content-fingerprint', 'content-keyword'], $categories, 'cross-category carry must vote for both');
+
+        // --- carried signals must not be double-counted in the score ---
+        // 5 (x0.5 KW-004) + round(1 x 0.25) = 5 + 0 + 1 (x0.125 KW-004) = 6.
+        // Categories still vote even when their decayed score rounds to zero.
+        $this->assertSame(
+            6,
+            $cross->score,
+            'carried categories must not add score beyond the per-signal decay',
+        );
     }
 
     public function test_engine_is_idempotent_for_identical_inputs(): void
