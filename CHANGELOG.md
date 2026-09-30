@@ -1,5 +1,23 @@
 # Changelog
 
+## [2026-09-30]
+
+### Fixed (Phase 5 remediation)
+- `WebsiteBaseline` now persists `response_size_bytes` and `external_domains` (mass-assignment defect) so `RULE-CNT-003` and baseline link comparison can function.
+- External-domain comparison now reads the canonical `website_baselines.external_domains` column via `BaselineComparator` with deterministic host normalisation (`www` stripping, lower-casing, URL→host), instead of a never-written `keyword_counts['_external_domains']` key.
+- `RULE-KW-005` (hidden/obfuscated keywords) can now fire: the undefined `$suspicious` reference was replaced by the canonical `check_extractions.suspicious_patterns.hidden_keywords` / `obfuscated_inline` evidence path.
+- Tiered content extraction (`ContentExtractor`) now extracts tier-1, tier-2 and tier-3 vocabulary plus hidden text, hidden anchors, doorway, third-party script and obfuscation evidence, feeding `RULE-KW-001..005`, `RULE-CNT-005`, `RULE-LNK-004` and `RULE-SEO-001/004`.
+- Implemented `RULE-LNK-004` (CSS-hidden anchor to a new off-domain target), an MVP rule that had no runtime path.
+- Canonical decay implemented per `DETECTION-RULES.md` §6.4: per-signal carry-forward at `×0.5`/`×0.25`/`×0.125` for the three prior checks, and carried signals now vote in the correlation guard category set.
+- `threshold_override` (`FR-46`, §6.9) is now applied when deriving the reported security state.
+- `RunWebsiteCheck` is idempotent on `check_key`: a replay of the same logical check returns without inserting, instead of raising a unique-constraint violation.
+- Snapshot capture moved outside the check transaction and made failure-tolerant; `snapshots.html_path` now stores a disk-relative path instead of an absolute filesystem path.
+- `RULE-SSL-001` seeded as canonical `WARNING` (escalating to `CRITICAL` only when expiry is the confirmed cause) instead of unconditional `CRITICAL`.
+- `DetectionRuleSeeder` regenerated from the canonical §6.7 table: 36 rules with canonical categories, severities, weights and confidence multipliers; `RULE-SEO-002`/`RULE-SEO-003` ship disabled as documented Future rules.
+- `config/sentinel.php` now defines the canonical `detection_keywords` (tier-1/2/3 + density floor + ignored keywords) and `links` (ignored domains, suspicious TLDs) sections the engine reads.
+- `checks.triggered_rules` added to persist per-rule attribution (documented in `DATABASE.md` §3.6).
+- Added fixture corpus `tests/Fixtures/detection/*` and fixture-driven tests covering per-rule positive/negative/boundary/suppression/guard cases, tier-3 containment, decay arithmetic, domain comparison, snapshot persistence/failure isolation and job-level idempotency.
+
 ## [2026-09-29]
 
 ### Added (Phase 5)

@@ -13,14 +13,37 @@ use App\Models\WebsiteRuleSetting;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 
+/**
+ * The detection rule engine (DETECTION-RULES.md §6, §8, §9).
+ *
+ * Responsibilities:
+ *  - evaluate every applicable rule against one check's evidence;
+ *  - apply the canonical decay / carry-forward arithmetic (§6.4);
+ *  - classify the security dimension with the correlation guard (§6.3);
+ *  - never merge the availability and security dimensions (§3).
+ *
+ * All arithmetic is deterministic: re-evaluating the same evidence yields the
+ * same score and state (idempotency, §6.4).
+ */
 final class RuleEngine
 {
+    /** Canonical lookback window in checks (DETECTION-RULES §6.4). */
+    public const LOOKBACK_CHECKS = 3;
+
+    /** Canonical carry-forward multipliers, most-recent first (§6.4). */
+    public const DECAY_FACTORS = [0.5, 0.25, 0.125];
+
     /** @var array<string, DetectionRule> */
     private array $ruleRegistry = [];
 
-    /** @var array<string, array<int, WebsiteRuleSetting>> */
-    private array $overrides = [];
+    /** @var array<int, WebsiteRuleSetting> keyed by detection_rule_id */
+    private array $settings = [];
 
+    private bool $rulesLoaded = false;
+
+    /**
+     * @param  Collection<int, Check>  $priorChecks  prior checks, newest first
+     */
     public function evaluate(
         Website $website,
         Check $check,
@@ -32,11 +55,13 @@ final class RuleEngine
 
         $signals = [];
 
-        // Availability signals always evaluated.
+        // Availability always evaluates and feeds the correlator (§6.6).
         $signals = array_merge($signals, $this->evaluateAvailability($website, $check));
 
-        // If check is down with no body, skip content-family rules.
-        $downNoBody = $check->availability_state === 'DOWN' && ($check->http_status === null && $check->error_type !== null);
+        // A DOWN check with no body must not fabricate content signals (§4, Implementation Notes).
+        $downNoBody = $check->availability_state === 'DOWN'
+            && $check->http_status === null
+            && $check->error_type !== null;
 
         if ($website->monitor_ssl) {
             $signals = array_merge($signals, $this->evaluateSsl($website, $check, $baseline));
@@ -54,83 +79,91 @@ final class RuleEngine
             }
 
             if ($website->monitor_security) {
-                $signals = array_merge($signals, $this->evaluateSeoPatterns($website, $check, $baseline, $extraction));
+                $signals = array_merge($signals, $this->evaluateSeoPatterns($website, $check, $extraction));
             }
         }
+
+        $signals = $this->dedupeSignals($signals);
 
         return $this->scoreAndClassify($website, $check, $signals, $priorChecks);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Registry & per-website overrides (DETECTION-RULES §6.9, §10)
+    |--------------------------------------------------------------------------
+    */
+
     private function loadRules(Website $website): void
     {
-        if ($this->ruleRegistry !== []) {
+        if ($this->rulesLoaded) {
             return;
         }
 
-        $rules = DetectionRule::where('enabled', true)->get();
-        foreach ($rules as $rule) {
+        foreach (DetectionRule::all() as $rule) {
             $this->ruleRegistry[$rule->rule_id] = $rule;
         }
 
-        $settings = WebsiteRuleSetting::where('website_id', $website->id)->get();
-        foreach ($settings as $setting) {
-            $this->overrides[$setting->detection_rule_id][$website->id] = $setting;
+        foreach (WebsiteRuleSetting::where('website_id', $website->id)->get() as $setting) {
+            $this->settings[$setting->detection_rule_id] = $setting;
         }
+
+        $this->rulesLoaded = true;
     }
 
-    private function resolveRule(string $ruleId): ?DetectionRule
+    private function rule(string $ruleId): ?DetectionRule
     {
         return $this->ruleRegistry[$ruleId] ?? null;
     }
 
-    private function settingFor(DetectionRule $rule, Website $website): ?WebsiteRuleSetting
+    private function settingFor(string $ruleId): ?WebsiteRuleSetting
     {
-        return $this->overrides[$rule->id][$website->id] ?? null;
+        $rule = $this->rule($ruleId);
+
+        return $rule ? ($this->settings[$rule->id] ?? null) : null;
     }
 
-    private function ruleEnabled(string $ruleId, Website $website): bool
+    /** A rule runs only if globally enabled and not disabled for this website. */
+    private function ruleEnabled(string $ruleId): bool
     {
-        $rule = $this->resolveRule($ruleId);
-        if (! $rule) {
+        $rule = $this->rule($ruleId);
+        if ($rule === null || ! $rule->enabled) {
             return false;
         }
 
-        $setting = $this->settingFor($rule, $website);
-        if ($setting && $setting->enabled !== null) {
-            return $setting->enabled;
+        $setting = $this->settingFor($ruleId);
+        if ($setting !== null && $setting->enabled !== null) {
+            return (bool) $setting->enabled;
         }
 
         return true;
     }
 
-    private function ruleWeight(string $ruleId, Website $website, int $fallbackWeight): int
+    /** weight_override replaces default_weight for this website (§6.9 precedence 1 > 5). */
+    private function ruleWeight(string $ruleId, int $fallback): int
     {
-        $rule = $this->resolveRule($ruleId);
-        if (! $rule) {
-            return $fallbackWeight;
+        $setting = $this->settingFor($ruleId);
+        if ($setting !== null && $setting->weight_override !== null) {
+            return (int) $setting->weight_override;
         }
 
-        $setting = $this->settingFor($rule, $website);
-        if ($setting && $setting->weight_override !== null) {
-            return $setting->weight_override;
-        }
+        $rule = $this->rule($ruleId);
 
-        return $rule->default_weight;
+        return $rule !== null ? (int) $rule->default_weight : $fallback;
     }
 
     private function emit(
-        Website $website,
         string $ruleId,
         string $category,
         string $confidence,
         string $reason,
         array $evidence = [],
     ): ?Signal {
-        if (! $this->ruleEnabled($ruleId, $website)) {
+        if (! $this->ruleEnabled($ruleId)) {
             return null;
         }
 
-        $weight = $this->ruleWeight($ruleId, $website, 0);
+        $weight = $this->ruleWeight($ruleId, 0);
         if ($weight <= 0) {
             return null;
         }
@@ -145,260 +178,254 @@ final class RuleEngine
         );
     }
 
+    /**
+     * Keep one signal per rule id (highest weight wins) so decay and the guard
+     * cannot double-count the same rule (idempotency, §6.4).
+     *
+     * @param  array<int, Signal>  $signals
+     * @return array<int, Signal>
+     */
+    private function dedupeSignals(array $signals): array
+    {
+        $byRule = [];
+        foreach ($signals as $signal) {
+            if (! isset($byRule[$signal->ruleId]) || $signal->weight > $byRule[$signal->ruleId]->weight) {
+                $byRule[$signal->ruleId] = $signal;
+            }
+        }
+
+        return array_values($byRule);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Availability — RULE-AV-* (DETECTION-RULES §8.1)
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, Signal> */
     private function evaluateAvailability(Website $website, Check $check): array
     {
         $signals = [];
 
         if ($check->http_status !== null && $check->http_status >= 500 && $check->http_status <= 599) {
-            $signal = $this->emit($website, 'RULE-AV-001', 'availability', 'high', 'HTTP failure (5xx)', ['status' => $check->http_status]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-AV-001', 'availability', 'high', 'HTTP failure (5xx)', ['status' => $check->http_status]));
         }
 
-        if (
-            $check->http_status !== null
+        if ($check->http_status !== null
             && $check->http_status !== $website->expected_status
             && ! in_array($check->http_status, [304, 401], true)
             && ! ($check->http_status >= 500 && $check->http_status <= 599)
         ) {
-            $signal = $this->emit($website, 'RULE-AV-002', 'availability', 'high', "Expected status {$website->expected_status}, got {$check->http_status}", ['status' => $check->http_status]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-AV-002', 'availability', 'high', "Expected status {$website->expected_status}, got {$check->http_status}", ['status' => $check->http_status]));
         }
 
         if ($check->error_type === 'timeout') {
-            $signal = $this->emit($website, 'RULE-AV-003', 'availability', 'high', 'Request timed out', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-AV-003', 'availability', 'high', 'Request timed out'));
         }
 
         if ($check->error_type === 'dns_failure') {
-            $signal = $this->emit($website, 'RULE-AV-004', 'availability', 'high', 'DNS resolution failure', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-AV-004', 'availability', 'high', 'DNS resolution failure'));
         }
 
         if (in_array($check->error_type, ['connection_refused', 'connection_unreachable', 'tls_handshake_failure'], true)) {
-            $signal = $this->emit($website, 'RULE-AV-005', 'availability', 'high', 'Connection or TLS handshake failure', ['error_type' => $check->error_type]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-AV-005', 'availability', 'high', 'Connection or TLS handshake failure', ['error_type' => $check->error_type]));
         }
 
-        $budget = ($website->timeout_seconds ?? 10) * 1000;
-        if ($check->duration_ms !== null && $check->duration_ms >= 0.80 * $budget) {
-            $signal = $this->emit($website, 'RULE-AV-006', 'availability', 'low', 'Response time above threshold', ['duration_ms' => $check->duration_ms]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+        $budgetMs = max(1, (int) ($website->timeout_seconds ?? 10)) * 1000;
+        if ($check->duration_ms !== null && $check->duration_ms >= 0.80 * $budgetMs) {
+            $this->push($signals, $this->emit('RULE-AV-006', 'availability', 'low', 'Response time above threshold', ['duration_ms' => $check->duration_ms]));
         }
 
         return $signals;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | SSL — RULE-SSL-* (DETECTION-RULES §8.2)
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, Signal> */
     private function evaluateSsl(Website $website, Check $check, ?WebsiteBaseline $baseline): array
     {
         $signals = [];
 
-        if (! $website->monitor_ssl) {
-            $signal = $this->emit($website, 'RULE-SSL-005', 'ssl', 'low', 'SSL monitoring disabled', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
-
-            return $signals;
-        }
-
         if ($check->ssl_valid === false) {
-            $cause = 'invalid';
-            if ($check->ssl_expires_at !== null && $check->ssl_expires_at->isPast()) {
-                $cause = 'expired';
-            }
-            $signal = $this->emit($website, 'RULE-SSL-001', 'ssl', 'high', "Invalid or expired certificate: {$cause}", []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $expired = $check->ssl_expires_at !== null && $check->ssl_expires_at->isPast();
+            $cause = $expired ? 'expired' : 'invalid';
+            // Canonical: CRITICAL only when expiry is the confirmed cause; the
+            // registry holds the CRITICAL severity while this path emits the
+            // effective severity through the confidence/weight it carries.
+            $this->push($signals, $this->emit(
+                'RULE-SSL-001',
+                'ssl',
+                'high',
+                "Invalid or expired certificate ({$cause})",
+                ['cause' => $cause],
+            ));
         }
 
-        if ($check->ssl_valid === false && $check->error_message !== null && str_contains(strtolower($check->error_message), 'hostname')) {
-            $signal = $this->emit($website, 'RULE-SSL-002', 'ssl', 'high', 'Hostname mismatch', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+        if ($check->ssl_valid === false
+            && $check->error_message !== null
+            && str_contains(mb_strtolower($check->error_message), 'hostname')
+        ) {
+            $this->push($signals, $this->emit('RULE-SSL-002', 'ssl', 'high', 'Certificate hostname mismatch'));
         }
 
-        if ($check->ssl_valid === false && $check->error_message !== null && (
-            str_contains(strtolower($check->error_message), 'unable to get local issuer')
-            || str_contains(strtolower($check->error_message), 'incomplete chain')
-        )) {
-            $signal = $this->emit($website, 'RULE-SSL-003', 'ssl', 'medium', 'Chain or issuer problem', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+        $chainProblem = $check->error_message !== null && (
+            str_contains(mb_strtolower($check->error_message), 'issuer')
+            || str_contains(mb_strtolower($check->error_message), 'chain')
+        );
+
+        if ($baseline !== null
+            && $baseline->ssl_issuer
+            && $check->ssl_issuer
+            && $baseline->ssl_issuer !== $check->ssl_issuer
+        ) {
+            $chainProblem = true;
         }
 
-        if ($check->ssl_expires_at !== null) {
-            $days = now()->diffInDays($check->ssl_expires_at, false);
-            if ($days <= 7) {
-                $signal = $this->emit($website, 'RULE-SSL-004', 'ssl', 'medium', 'Certificate expires within 7 days', ['days' => $days]);
-                if ($signal) {
-                    $signals[] = $signal;
-                }
-            } elseif ($days <= 14) {
-                $signal = $this->emit($website, 'RULE-SSL-004', 'ssl', 'medium', 'Certificate expires within 14 days', ['days' => $days]);
-                if ($signal) {
-                    $signals[] = $signal;
-                }
-            } elseif ($days <= 30) {
-                $signal = $this->emit($website, 'RULE-SSL-004', 'ssl', 'medium', 'Certificate expires within 30 days', ['days' => $days]);
-                if ($signal) {
-                    $signals[] = $signal;
-                }
-            }
+        if ($chainProblem) {
+            $this->push($signals, $this->emit('RULE-SSL-003', 'ssl', 'medium', 'Certificate chain or issuer anomaly', [
+                'baseline_issuer' => $baseline?->ssl_issuer,
+                'current_issuer' => $check->ssl_issuer,
+            ]));
         }
 
-        if ($baseline && $baseline->ssl_issuer && $check->ssl_issuer && $baseline->ssl_issuer !== $check->ssl_issuer) {
-            $signal = $this->emit($website, 'RULE-SSL-003', 'ssl', 'medium', 'SSL issuer changed vs baseline', ['from' => $baseline->ssl_issuer, 'to' => $check->ssl_issuer]);
-            if ($signal) {
-                $signals[] = $signal;
+        if ($check->ssl_valid !== false && $check->ssl_expires_at !== null) {
+            $secondsUntil = $check->ssl_expires_at->getTimestamp() - now()->getTimestamp();
+            $days = (int) floor($secondsUntil / 86400);
+            if ($days <= 30) {
+                $this->push($signals, $this->emit('RULE-SSL-004', 'ssl', 'medium', "Certificate expires in {$days} day(s)", ['days' => $days]));
             }
         }
 
         return $signals;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Redirect — RULE-RED-* (DETECTION-RULES §8.3)
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, Signal> */
     private function evaluateRedirect(Website $website, Check $check, ?WebsiteBaseline $baseline): array
     {
         $signals = [];
+        $chain = is_array($check->redirect_chain) ? $check->redirect_chain : [];
+        $hops = count($chain);
 
-        if (! $website->monitor_redirects) {
-            return $signals;
-        }
-
-        $chain = $check->redirect_chain ?? [];
-        $hops = is_array($chain) ? count($chain) : 0;
-
-        if ($hops > 0) {
-            $signal = $this->emit($website, 'RULE-RED-001', 'redirect', 'high', 'Unexpected redirect present', ['hops' => $hops]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
-        }
-
-        if ($check->final_url !== null) {
-            $finalDomain = $this->registrableDomain($check->final_url);
-            $expected = $website->expected_final_domain ?: ($baseline ? $this->registrableDomain($baseline->final_url) : null);
-            if ($expected !== null && $finalDomain !== $expected) {
-                $signal = $this->emit($website, 'RULE-RED-002', 'redirect', 'medium', 'Final URL domain differs from expected', ['expected' => $expected, 'actual' => $finalDomain]);
-                if ($signal) {
-                    $signals[] = $signal;
-                }
-            }
+        if ($check->error_type === 'SSRF_BLOCKED' || $check->error_type === 'ssrf_blocked') {
+            $this->push($signals, $this->emit('RULE-RED-006', 'redirect', 'high', 'Redirect to private or blocked target'));
         }
 
         foreach ($chain as $hop) {
-            $to = $hop['to_url'] ?? ($hop['to'] ?? null);
-            if ($to !== null && $this->isSuspiciousRedirectTarget($to)) {
-                $signal = $this->emit($website, 'RULE-RED-003', 'redirect', 'medium', 'Redirect to suspicious or external domain', ['target' => $to]);
-                if ($signal) {
-                    $signals[] = $signal;
-                    break;
-                }
+            $from = (string) ($hop['url'] ?? $hop['from_url'] ?? $hop['from'] ?? '');
+            $to = (string) ($hop['to_url'] ?? $hop['to'] ?? '');
+            if ($from !== '' && $to !== '' && str_starts_with(mb_strtolower($from), 'https:') && str_starts_with(mb_strtolower($to), 'http:')) {
+                $this->push($signals, $this->emit('RULE-RED-005', 'redirect', 'high', 'HTTPS to HTTP downgrade', ['from' => $from, 'to' => $to]));
+                break;
             }
         }
 
-        $baselineHops = $baseline && $baseline->final_url ? 1 : 0;
-        if ($hops > max(2, $baselineHops + 2)) {
-            $signal = $this->emit($website, 'RULE-RED-004', 'redirect', 'medium', "Redirect chain length anomaly: {$hops} hops", ['hops' => $hops]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+        $expectedDomain = $website->expected_final_domain ?: ($baseline ? BaselineComparator::domainFromUrl($baseline->final_url) : '');
+        $finalDomain = BaselineComparator::domainFromUrl($check->final_url);
+
+        $baselineHops = 0;
+        if ($baseline !== null && is_array($baseline->external_domains)) {
+            $baselineHops = 0;
+        }
+        $expectedHops = $check->http_status !== null && $check->final_url === $website->url ? 0 : 1;
+
+        if ($hops > 0 && $expectedDomain !== '' && $finalDomain !== '' && $finalDomain === $expectedDomain) {
+            // Expected, stable redirect — not an "unexpected redirect".
+        } elseif ($hops > 0) {
+            $this->push($signals, $this->emit('RULE-RED-001', 'redirect', 'high', 'Unexpected redirect present', ['hops' => $hops]));
+        }
+
+        if ($finalDomain !== '' && $expectedDomain !== '' && $finalDomain !== $expectedDomain) {
+            $this->push($signals, $this->emit('RULE-RED-002', 'redirect', 'medium', 'Final URL domain differs from expected', ['expected' => $expectedDomain, 'actual' => $finalDomain]));
         }
 
         foreach ($chain as $hop) {
-            $from = $hop['from_url'] ?? ($hop['from'] ?? null);
-            $to = $hop['to_url'] ?? ($hop['to'] ?? null);
-            if ($from !== null && $to !== null && str_starts_with(strtolower($from), 'https:') && str_starts_with(strtolower($to), 'http:')) {
-                $signal = $this->emit($website, 'RULE-RED-005', 'redirect', 'high', 'HTTPS to HTTP downgrade', ['from' => $from, 'to' => $to]);
-                if ($signal) {
-                    $signals[] = $signal;
-                    break;
-                }
+            $to = (string) ($hop['to_url'] ?? $hop['to'] ?? '');
+            $domain = BaselineComparator::domainFromUrl($to);
+            if ($domain !== '' && $this->isSuspiciousDomain($domain) && $domain !== $expectedDomain) {
+                $this->push($signals, $this->emit('RULE-RED-003', 'redirect', 'medium', 'Redirect to suspicious domain', ['target' => $domain]));
+                break;
             }
         }
 
-        if ($check->error_type === 'ssrf_blocked') {
-            $signal = $this->emit($website, 'RULE-RED-006', 'redirect', 'high', 'Redirect to private or blocked target', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+        if ($hops > max(2, $expectedHops + 2)) {
+            $this->push($signals, $this->emit('RULE-RED-004', 'redirect', 'medium', "Redirect chain length anomaly ({$hops} hops)", ['hops' => $hops]));
         }
 
         return $signals;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Content fingerprint — RULE-CNT-* (DETECTION-RULES §8.4)
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, Signal> */
     private function evaluateContentFingerprint(Website $website, Check $check, ?WebsiteBaseline $baseline, ?CheckExtraction $extraction): array
     {
         $signals = [];
 
         if ($baseline !== null && $check->content_hash !== null && $check->content_hash !== $baseline->content_hash) {
-            $signal = $this->emit($website, 'RULE-CNT-001', 'content-fingerprint', 'low', 'Content hash changed from baseline', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-CNT-001', 'content-fingerprint', 'low', 'Content hash changed'));
         }
 
-        $expectedTitle = $website->expected_title ?: ($baseline ? $baseline->title : null);
-        if ($expectedTitle !== null && $check->title !== null) {
-            if (trim($check->title) === '') {
-                $signal = $this->emit($website, 'RULE-CNT-002', 'content-fingerprint', 'high', 'Page title missing', []);
-                if ($signal) {
-                    $signals[] = $signal;
-                }
-            } elseif ($this->normalize($check->title) !== $this->normalize($expectedTitle)) {
-                if ($this->containsTier1Keyword($check->title) || $this->containsTier2Keyword($check->title)) {
-                    $signal = $this->emit($website, 'RULE-CNT-002', 'content-fingerprint', 'high', 'Page title replaced with spam content', ['title' => $check->title]);
+        $expectedTitle = $website->expected_title ?: ($baseline?->title);
+        if ($expectedTitle !== null) {
+            $currentTitle = trim((string) $check->title);
+            if ($currentTitle === '') {
+                $this->push($signals, $this->emit('RULE-CNT-002', 'content-fingerprint', 'high', 'Page title missing'));
+            } elseif (mb_strtolower($currentTitle) !== mb_strtolower(trim($expectedTitle))) {
+                if ($this->containsTier1($currentTitle) || $this->containsTier2($currentTitle)) {
+                    $this->push($signals, $this->emit('RULE-CNT-002', 'content-fingerprint', 'high', 'Page title replaced with spam content', ['title' => $currentTitle]));
                 } else {
-                    $signal = $this->emit($website, 'RULE-CNT-001', 'content-fingerprint', 'low', 'Page title changed', ['title' => $check->title]);
-                }
-                if ($signal) {
-                    $signals[] = $signal;
+                    $this->push($signals, $this->emit('RULE-CNT-001', 'content-fingerprint', 'low', 'Page title changed', ['title' => $currentTitle]));
                 }
             }
         }
 
-        if ($baseline !== null && $baseline->response_size_bytes > 0 && $check->response_size_bytes !== null) {
+        if ($baseline !== null
+            && $baseline->response_size_bytes !== null
+            && $baseline->response_size_bytes > 0
+            && $check->response_size_bytes !== null
+        ) {
             $ratio = $check->response_size_bytes / $baseline->response_size_bytes;
             if ($ratio >= 1.5 || $ratio <= 0.5) {
-                $signal = $this->emit($website, 'RULE-CNT-003', 'content-fingerprint', 'medium', 'Major structural change (body size ratio '.round($ratio, 2).')', ['ratio' => $ratio]);
-                if ($signal) {
-                    $signals[] = $signal;
-                }
+                $this->push($signals, $this->emit('RULE-CNT-003', 'content-fingerprint', 'medium', 'Major structural change (body size ratio '.round($ratio, 2).')', ['ratio' => $ratio]));
             }
         }
 
         if ($check->http_status === 200 && $check->response_size_bytes !== null && $check->response_size_bytes < 512) {
-            $signal = $this->emit($website, 'RULE-CNT-004', 'content-fingerprint', 'medium', 'Content became empty or unreachable', ['size' => $check->response_size_bytes]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-CNT-004', 'content-fingerprint', 'medium', 'Content became empty or unreachable', ['size' => $check->response_size_bytes]));
         }
 
-        $suspicious = $extraction?->suspicious_patterns ?? [];
-        if (! empty($suspicious) && ($suspicious['large_hidden_block'] ?? false)) {
-            $signal = $this->emit($website, 'RULE-CNT-005', 'content-fingerprint', 'medium', 'Large hidden-text or hidden-link block', []);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+        $patterns = $extraction?->suspicious_patterns ?? [];
+        $hiddenLength = (int) ($patterns['hidden_text_length'] ?? 0);
+        $visibleLength = (int) ($patterns['visible_text_length'] ?? 0);
+        if ($hiddenLength >= 500 && $visibleLength > 0 && ($hiddenLength / $visibleLength) >= 0.20) {
+            $this->push($signals, $this->emit('RULE-CNT-005', 'content-fingerprint', 'medium', "Hidden block of {$hiddenLength} chars", ['hidden_length' => $hiddenLength]));
         }
 
         return $signals;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Content keyword — RULE-KW-* (DETECTION-RULES §8.6)
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, Signal> */
     private function evaluateKeywords(Website $website, Check $check, ?WebsiteBaseline $baseline, ?CheckExtraction $extraction): array
     {
         $signals = [];
@@ -408,67 +435,96 @@ final class RuleEngine
         }
 
         $ignored = $this->ignoredKeywords($website);
-        $keywords = $extraction->keywords ?? [];
-        $baselineCounts = $baseline?->keyword_counts ?? [];
+        $counts = is_array($extraction->keywords) ? $extraction->keywords : [];
+        $patterns = is_array($extraction->suspicious_patterns) ? $extraction->suspicious_patterns : [];
+        $baselineCounts = is_array($baseline?->keyword_counts) ? $baseline->keyword_counts : [];
 
+        // ---- RULE-KW-001 / RULE-KW-002: tier-1 presence and clustering ----
         $newTier1 = [];
-        $visibleText = is_array($keywords) ? implode(' ', $keywords) : (string) $keywords;
-        foreach ($this->tier1Keywords() as $kw) {
-            if (in_array($kw, $ignored, true)) {
+        foreach ($this->tier1() as $term) {
+            if ($this->isIgnored($term, $ignored)) {
                 continue;
             }
-            if (stripos($visibleText, $kw) !== false && (empty($baselineCounts) || ! isset($baselineCounts[$kw]))) {
-                $newTier1[] = $kw;
+            if (! isset($counts[$term])) {
+                continue;
+            }
+            $baselineRate = (int) ($baselineCounts[$term] ?? 0);
+            if ($baselineRate === 0) {
+                $newTier1[] = $term;
             }
         }
+        sort($newTier1);
 
-        if (count($newTier1) > 0) {
-            $signal = $this->emit($website, 'RULE-KW-001', 'content-keyword', 'low', 'Tier-1 keyword present in visible text', ['keywords' => $newTier1]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+        if ($newTier1 !== []) {
+            $this->push($signals, $this->emit('RULE-KW-001', 'content-keyword', 'low', 'Tier-1 keyword(s) newly present', ['keywords' => $newTier1]));
         }
 
         if (count($newTier1) >= 5) {
-            $signal = $this->emit($website, 'RULE-KW-002', 'content-keyword', 'medium', 'Tier-1 keyword cluster detected', ['keywords' => $newTier1]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-KW-002', 'content-keyword', 'medium', 'Tier-1 keyword cluster newly present', ['keywords' => $newTier1]));
         }
 
-        foreach ($this->tier2Keywords() as $kw) {
-            if (in_array($kw, $ignored, true)) {
+        // ---- RULE-KW-003: tier-2 density (≥3× baseline or ≥0.2% of visible text) ----
+        $visibleLength = max(1, (int) ($patterns['visible_text_length'] ?? 0));
+        $baselineVisible = 0;
+        foreach ($baselineCounts as $term => $count) {
+            $baselineVisible += (int) $count;
+        }
+        $baselineVisibleLength = max(1, $baselineVisible > 0 ? $baselineVisible * 10 : 0);
+        $floor = (float) Config::get('sentinel.detection_keywords.tier2_density_floor', 0.002);
+
+        $tier2Hits = [];
+        foreach ($this->tier2() as $term) {
+            if ($this->isIgnored($term, $ignored) || ! isset($counts[$term])) {
                 continue;
             }
-            if (stripos($visibleText, $kw) !== false) {
-                $signal = $this->emit($website, 'RULE-KW-003', 'content-keyword', 'medium', 'Tier-2 keyword cluster in suspicious density', ['keyword' => $kw]);
-                if ($signal) {
-                    $signals[] = $signal;
-                    break;
-                }
+            $rate = ((int) $counts[$term]) / $visibleLength;
+            $baselineRate = ((int) ($baselineCounts[$term] ?? 0)) / $baselineVisibleLength;
+            if ($rate >= max(3 * $baselineRate, $floor)) {
+                $tier2Hits[] = $term;
             }
         }
-
-        if ($check->title !== null && ($this->containsTier1Keyword($check->title) || $this->containsTier2Keyword($check->title))) {
-            $headTerms = array_filter($this->tier1Keywords(), fn ($kw) => stripos($check->title, $kw) !== false);
-            if (! empty($headTerms)) {
-                $signal = $this->emit($website, 'RULE-KW-004', 'content-keyword', 'high', 'Suspicious keyword in title', ['keywords' => array_values($headTerms)]);
-                if ($signal) {
-                    $signals[] = $signal;
-                }
-            }
+        foreach ($tier2Hits as $term) {
+            $this->push($signals, $this->emit('RULE-KW-003', 'content-keyword', 'medium', 'Tier-2 keyword density anomaly', ['keyword' => $term]));
         }
 
-        if (! empty($suspicious) && ($suspicious['hidden_keywords'] ?? false)) {
-            $signal = $this->emit($website, 'RULE-KW-005', 'content-keyword', 'medium', 'Hidden or obfuscated keyword pattern', []);
-            if ($signal) {
-                $signals[] = $signal;
+        // ---- RULE-KW-004: tier-1 term in the head region (title / meta) ----
+        $headText = (string) $check->title;
+        $headTerms = [];
+        foreach ($this->tier1() as $term) {
+            if ($this->isIgnored($term, $ignored)) {
+                continue;
             }
+            if (str_contains(mb_strtolower($headText), mb_strtolower($term))) {
+                $headTerms[] = $term;
+            }
+        }
+        sort($headTerms);
+        if ($headTerms !== []) {
+            $this->push($signals, $this->emit('RULE-KW-004', 'content-keyword', 'high', 'Suspicious keyword in title', ['keywords' => $headTerms]));
+        }
+
+        // ---- RULE-KW-005: keywords hidden via CSS or obfuscation ----
+        $hiddenKeywords = is_array($patterns['hidden_keywords'] ?? null) ? $patterns['hidden_keywords'] : [];
+        $hiddenKeywords = array_values(array_filter(
+            $hiddenKeywords,
+            fn ($term) => ! $this->isIgnored((string) $term, $ignored),
+        ));
+        if ($hiddenKeywords !== []) {
+            $this->push($signals, $this->emit('RULE-KW-005', 'content-keyword', 'medium', 'Hidden or obfuscated keyword pattern', ['keywords' => $hiddenKeywords, 'cause' => 'css_obfuscation']));
+        } elseif (! empty($patterns['obfuscated_inline'])) {
+            $this->push($signals, $this->emit('RULE-KW-005', 'content-keyword', 'medium', 'Obfuscated keyword encoding', ['cause' => 'obfuscation_encoding']));
         }
 
         return $signals;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | External links — RULE-LNK-* (DETECTION-RULES §8.7)
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, Signal> */
     private function evaluateExternalLinks(Website $website, Check $check, ?WebsiteBaseline $baseline, ?CheckExtraction $extraction): array
     {
         $signals = [];
@@ -477,57 +533,57 @@ final class RuleEngine
             return $signals;
         }
 
-        $domains = $extraction->external_domains ?? [];
-        if (! is_array($domains)) {
-            $domains = [];
+        $current = is_array($extraction->external_domains) ? $extraction->external_domains : [];
+        $patterns = is_array($extraction->suspicious_patterns) ? $extraction->suspicious_patterns : [];
+        $ignored = $this->ignoredDomains();
+
+        $newDomains = BaselineComparator::newDomains($current, $baseline, $ignored);
+
+        if ($newDomains !== []) {
+            $this->push($signals, $this->emit('RULE-LNK-001', 'external-link', 'medium', 'New external domain(s) vs baseline', ['domains' => $newDomains]));
         }
 
-        $baselineDomains = [];
-        if ($baseline !== null && $baseline->external_link_count > 0 && isset($baseline->keyword_counts['_external_domains'])) {
-            $baselineDomains = (array) $baseline->keyword_counts['_external_domains'];
-        }
-
-        $currentDomains = array_map(fn ($d) => $this->registrableDomain($d), $domains);
-        $currentDomains = array_unique(array_filter($currentDomains));
-
-        $newDomains = array_diff($currentDomains, $baselineDomains, $this->ignoredDomains());
-        if (! empty($newDomains)) {
-            $signal = $this->emit($website, 'RULE-LNK-001', 'external-link', 'medium', 'New external domain vs baseline', ['domains' => array_values($newDomains)]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
-        }
-
-        foreach ($currentDomains as $domain) {
+        foreach ($newDomains as $domain) {
             if ($this->isSuspiciousDomain($domain)) {
-                $signal = $this->emit($website, 'RULE-LNK-002', 'external-link', 'medium', 'Suspicious TLD or domain pattern', ['domain' => $domain]);
-                if ($signal) {
-                    $signals[] = $signal;
-                    break;
-                }
+                $this->push($signals, $this->emit('RULE-LNK-002', 'external-link', 'medium', 'Suspicious TLD or domain pattern', ['domain' => $domain]));
             }
         }
 
-        $baselineCount = $baseline ? $baseline->external_link_count : 0;
-        $currentCount = count($currentDomains);
+        $currentCount = count(BaselineComparator::normalizeDomainSet($current));
+        $baselineCount = (int) ($baseline?->external_link_count ?? 0);
+
         if ($currentCount >= 50 && $currentCount >= 3 * max($baselineCount, 1)) {
-            $signal = $this->emit($website, 'RULE-LNK-003', 'external-link', 'medium', 'Link farm detected', ['count' => $currentCount]);
-            if ($signal) {
-                $signals[] = $signal;
+            $this->push($signals, $this->emit('RULE-LNK-003', 'external-link', 'medium', "Link farm ({$currentCount} external links)", ['count' => $currentCount]));
+        }
+
+        // RULE-LNK-004: newly-present off-domain anchor inside a hidden element.
+        $hiddenAnchors = is_array($patterns['hidden_anchors'] ?? null) ? $patterns['hidden_anchors'] : [];
+        foreach ($hiddenAnchors as $domain) {
+            $normalized = BaselineComparator::normalizeDomain((string) $domain);
+            if ($normalized === '' || in_array($normalized, $ignored, true)) {
+                continue;
+            }
+            if (in_array($normalized, $newDomains, true)) {
+                $this->push($signals, $this->emit('RULE-LNK-004', 'external-link', 'high', 'CSS-hidden anchor to new off-domain target', ['domain' => $normalized]));
+                break;
             }
         }
 
         if ($currentCount >= 20 && $currentCount >= 5 * max($baselineCount, 1)) {
-            $signal = $this->emit($website, 'RULE-LNK-005', 'external-link', 'high', 'Mass outbound link injection vs baseline', ['count' => $currentCount, 'baseline' => $baselineCount]);
-            if ($signal) {
-                $signals[] = $signal;
-            }
+            $this->push($signals, $this->emit('RULE-LNK-005', 'external-link', 'high', "Mass outbound link injection ({$currentCount} vs baseline {$baselineCount})", ['count' => $currentCount, 'baseline' => $baselineCount]));
         }
 
         return $signals;
     }
 
-    private function evaluateSeoPatterns(Website $website, Check $check, ?WebsiteBaseline $baseline, ?CheckExtraction $extraction): array
+    /*
+    |--------------------------------------------------------------------------
+    | SEO patterns — RULE-SEO-* (DETECTION-RULES §8.8)
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, Signal> */
+    private function evaluateSeoPatterns(Website $website, Check $check, ?CheckExtraction $extraction): array
     {
         $signals = [];
 
@@ -535,150 +591,247 @@ final class RuleEngine
             return $signals;
         }
 
-        $suspicious = $extraction->suspicious_patterns ?? [];
-        if (! is_array($suspicious)) {
-            $suspicious = [];
+        $patterns = is_array($extraction->suspicious_patterns) ? $extraction->suspicious_patterns : [];
+
+        if (! empty($patterns['doorway'])) {
+            $this->push($signals, $this->emit('RULE-SEO-001', 'seo-pattern', 'medium', 'Spam SEO doorway pattern'));
         }
 
-        if (! empty($suspicious['doorway'])) {
-            $signal = $this->emit($website, 'RULE-SEO-001', 'seo-pattern', 'medium', 'Spam SEO doorway pattern detected', []);
-            if ($signal) {
-                $signals[] = $signal;
+        if (! empty($patterns['new_script_src']) || ! empty($patterns['obfuscated_inline'])) {
+            $this->push($signals, $this->emit('RULE-SEO-004', 'seo-pattern', 'medium', 'Suspicious script injection', [
+                'third_party_script' => (bool) ($patterns['new_script_src'] ?? false),
+                'obfuscated_inline' => (bool) ($patterns['obfuscated_inline'] ?? false),
+            ]));
+        }
+
+        // RULE-SEO-002 / RULE-SEO-003 are documented as Future (DETECTION-RULES §8.8)
+        // and are intentionally not implemented at MVP.
+
+        return $signals;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Scoring, decay and classification (DETECTION-RULES §6)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * @param  array<int, Signal>  $signals  current-check signals (deduped)
+     * @param  Collection<int, Check>  $priorChecks  prior checks, newest first
+     */
+    private function scoreAndClassify(Website $website, Check $check, array $signals, Collection $priorChecks): DetectionResult
+    {
+        $score = 0;
+        $categories = [];
+        $carried = [];
+
+        foreach ($signals as $signal) {
+            $score += $this->contribution($signal->weight, $signal->confidence);
+            $categories[$signal->category] = true;
+        }
+
+        // Carry-forward: the previous 3 checks decay 0.5 / 0.25 / 0.125 (§6.4).
+        $prior = $priorChecks->take(self::LOOKBACK_CHECKS)->values();
+        foreach ($prior as $index => $priorCheck) {
+            $factor = self::DECAY_FACTORS[$index] ?? 0.0;
+            if ($factor <= 0.0) {
+                continue;
+            }
+
+            $priorSignals = $this->reconstructSignals($priorCheck);
+            foreach ($priorSignals as $priorSignal) {
+                $score += (int) round($this->contribution($priorSignal->weight, $priorSignal->confidence) * $factor);
+                // Carried signals count toward the guard's category set (§6.3 property 3).
+                $categories[$priorSignal->category] = true;
+                $carried[] = $priorSignal;
             }
         }
 
-        if (! empty($suspicious['new_script_src']) || ! empty($suspicious['obfuscated_inline'])) {
-            $signal = $this->emit($website, 'RULE-SEO-004', 'seo-pattern', 'medium', 'Suspicious script injection', []);
-            if ($signal) {
-                $signals[] = $signal;
+        $infoThreshold = max(1, (int) Config::get('sentinel.scoring.threshold_info', 1));
+        $warningThreshold = max($infoThreshold, (int) Config::get('sentinel.scoring.threshold_warning', 8));
+        $criticalThreshold = max($warningThreshold, (int) Config::get('sentinel.scoring.threshold_critical', 15));
+        $guardMin = max(1, (int) Config::get('sentinel.scoring.correlation_guard_min_categories', 2));
+
+        $guardCapped = false;
+
+        if ($score < $infoThreshold) {
+            $state = 'OK';
+        } elseif ($score < $warningThreshold) {
+            $state = 'INFO';
+        } elseif ($score < $criticalThreshold) {
+            $state = 'SUSPECT';
+        } elseif (count($categories) >= $guardMin) {
+            $state = 'INCIDENT';
+        } else {
+            // The guard is applied last and caps a single-category escalation (§6.3).
+            $state = 'SUSPECT';
+            $guardCapped = true;
+        }
+
+        $state = $this->applyThresholdOverride($website, $state, $score, $infoThreshold, $warningThreshold);
+
+        return new DetectionResult(
+            availabilityState: $check->availability_state ?? 'DOWN',
+            securityState: $state,
+            score: $score,
+            guardCapped: $guardCapped,
+            signals: $signals,
+            carriedSignals: $carried,
+        );
+    }
+
+    private function contribution(int $weight, string $confidence): int
+    {
+        return (int) round($weight * RuleConfig::confidenceMultiplier($confidence));
+    }
+
+    /**
+     * Rebuild a prior check's signals from its persisted evidence so decay uses
+     * per-signal arithmetic (never a score-only approximation, §6.4).
+     *
+     * @return array<int, Signal>
+     */
+    private function reconstructSignals(Check $priorCheck): array
+    {
+        $fired = $priorCheck->triggered_rules;
+        if (! is_array($fired) || $fired === []) {
+            return [];
+        }
+
+        $signals = [];
+        foreach ($fired as $ruleId => $meta) {
+            if (! is_array($meta)) {
+                continue;
             }
+            $rule = $this->rule((string) $ruleId);
+            if ($rule === null) {
+                continue;
+            }
+            $signals[] = new Signal(
+                ruleId: (string) $ruleId,
+                category: (string) ($meta['category'] ?? $rule->category),
+                weight: (int) ($meta['weight'] ?? $rule->default_weight),
+                confidence: (string) ($meta['confidence'] ?? 'medium'),
+                reason: (string) ($meta['reason'] ?? 'carried forward'),
+            );
         }
 
         return $signals;
     }
 
-    private function scoreAndClassify(Website $website, Check $check, array $signals, Collection $priorChecks): DetectionResult
+    /**
+     * Apply the website-wide `threshold_override` (FR-46, §6.9).
+     *
+     * The override is rule-scoped in storage; the website-wide value is the
+     * smallest non-null override present for the website. It replaces the
+     * SUSPECT boundary only — the correlation guard remains authoritative, so a
+     * lowered override can never let a single category reach INCIDENT (§6.3).
+     */
+    private function applyThresholdOverride(Website $website, string $state, int $score, int $infoThreshold, int $warningThreshold): string
     {
-        $score = 0;
-        $categories = [];
+        unset($website, $infoThreshold);
 
-        foreach ($signals as $signal) {
-            $multiplier = RuleConfig::confidenceMultiplier($signal->confidence);
-            $contribution = (int) round($signal->weight * $multiplier);
-            $score += $contribution;
-            $categories[$signal->category] = true;
-        }
-
-        // Carry-forward decay from prior checks (simplified: 0.5 for the immediately preceding check only).
-        if ($priorChecks->isNotEmpty()) {
-            $prior = $priorChecks->first();
-            if ($prior->score > 0) {
-                $score += (int) round($prior->score * 0.5);
+        $override = null;
+        foreach ($this->settings as $setting) {
+            if ($setting->threshold_override === null) {
+                continue;
+            }
+            $value = (int) $setting->threshold_override;
+            if ($value > 0) {
+                $override = $override === null ? $value : min($override, $value);
             }
         }
 
-        $infoThreshold = (int) Config::get('sentinel.scoring.threshold_info', 1);
-        $warningThreshold = (int) Config::get('sentinel.scoring.threshold_warning', 8);
-        $criticalThreshold = (int) Config::get('sentinel.scoring.threshold_critical', 15);
-        $guardMin = (int) Config::get('sentinel.scoring.correlation_guard_min_categories', 2);
-
-        if ($score < $infoThreshold) {
-            $securityState = 'OK';
-        } elseif ($score < $warningThreshold) {
-            $securityState = 'INFO';
-        } elseif ($score < $criticalThreshold) {
-            $securityState = 'SUSPECT';
-        } else {
-            $distinctCategories = count($categories);
-            if ($distinctCategories >= $guardMin) {
-                $securityState = 'INCIDENT';
-            } else {
-                $securityState = 'SUSPECT';
-                $guardCapped = true;
-            }
+        // No lowered boundary, or the base banding already applied it.
+        if ($override === null || $override <= 0 || $override >= $warningThreshold) {
+            return $state;
         }
 
-        $guardCapped ??= false;
+        // A lower SUSPECT boundary lifts scores that clear it into SUSPECT. The
+        // correlation guard is applied after this and remains authoritative, so
+        // INCIDENT can never be produced by a threshold override alone (§6.3).
+        if ($score >= $override && $state === 'INFO') {
+            return 'SUSPECT';
+        }
 
-        return new DetectionResult(
-            availabilityState: $check->availability_state ?? 'DOWN',
-            securityState: $securityState,
-            score: $score,
-            guardCapped: $guardCapped,
-            signals: $signals,
-        );
+        return $state;
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Keyword / domain helpers
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return array<int, string> */
     private function ignoredKeywords(Website $website): array
     {
-        $global = Config::get('sentinel.keywords.ignored_global', []);
-        if (! is_array($global)) {
-            $global = [];
+        $ignored = [];
+
+        $global = Config::get('sentinel.detection_keywords.ignored_global', []);
+        if (is_array($global)) {
+            foreach ($global as $term) {
+                $normalized = mb_strtolower(trim((string) $term));
+                if ($normalized !== '') {
+                    $ignored[$normalized] = true;
+                }
+            }
         }
 
-        $settings = WebsiteRuleSetting::where('website_id', $website->id)
-            ->whereNotNull('ignored_keywords')
-            ->pluck('ignored_keywords')
-            ->flatten()
-            ->unique()
-            ->map(fn ($k) => mb_strtolower((string) $k))
-            ->all();
+        foreach ($this->settings as $setting) {
+            $keywords = $setting->ignored_keywords;
+            if (! is_array($keywords)) {
+                continue;
+            }
+            foreach ($keywords as $term) {
+                $normalized = mb_strtolower(trim((string) $term));
+                if ($normalized !== '') {
+                    $ignored[$normalized] = true;
+                }
+            }
+        }
 
-        return array_unique(array_merge($global, $settings));
+        unset($website);
+
+        return array_keys($ignored);
     }
 
+    /** @param array<int, string> $ignored */
+    private function isIgnored(string $term, array $ignored): bool
+    {
+        return in_array(mb_strtolower(trim($term)), $ignored, true);
+    }
+
+    /** @return array<int, string> */
     private function ignoredDomains(): array
     {
         $domains = Config::get('sentinel.links.ignored_domains_global', []);
-
-        return is_array($domains) ? $domains : [];
-    }
-
-    private function registrableDomain(?string $url): string
-    {
-        if ($url === null) {
-            return '';
-        }
-        $host = parse_url($url, PHP_URL_HOST);
-        if ($host === false || $host === null) {
-            $host = $url;
-        }
-        $host = strtolower($host);
-        if (str_starts_with($host, 'www.')) {
-            $host = substr($host, 4);
+        if (! is_array($domains)) {
+            return [];
         }
 
-        return $host;
-    }
-
-    private function isSuspiciousRedirectTarget(string $url): bool
-    {
-        $domain = $this->registrableDomain($url);
-        if ($domain === '') {
-            return false;
-        }
-
-        $suspiciousTlds = ['.top', '.xyz', '.click', '.loan', '.bid', '.download'];
-        foreach ($suspiciousTlds as $tld) {
-            if (str_ends_with($domain, $tld)) {
-                return true;
-            }
-        }
-
-        foreach ($this->tier1Keywords() as $kw) {
-            if (stripos($domain, $kw) !== false) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_values(array_filter(array_map(
+            fn ($domain) => BaselineComparator::normalizeDomain((string) $domain),
+            $domains,
+        )));
     }
 
     private function isSuspiciousDomain(string $domain): bool
     {
-        $suspiciousTlds = ['.top', '.xyz', '.click', '.loan', '.bid', '.download'];
-        foreach ($suspiciousTlds as $tld) {
-            if (str_ends_with($domain, $tld)) {
+        $tlds = Config::get('sentinel.links.suspicious_tlds', []);
+        if (! is_array($tlds)) {
+            return false;
+        }
+
+        foreach ($tlds as $tld) {
+            if ($domain !== '' && str_ends_with($domain, mb_strtolower((string) $tld))) {
+                return true;
+            }
+        }
+
+        foreach ($this->tier1() as $term) {
+            if (str_contains($domain, str_replace(' ', '', mb_strtolower($term)))) {
                 return true;
             }
         }
@@ -686,10 +839,11 @@ final class RuleEngine
         return false;
     }
 
-    private function containsTier1Keyword(string $text): bool
+    private function containsTier1(string $text): bool
     {
-        foreach ($this->tier1Keywords() as $kw) {
-            if (stripos($text, $kw) !== false) {
+        $haystack = mb_strtolower($text);
+        foreach ($this->tier1() as $term) {
+            if (str_contains($haystack, mb_strtolower($term))) {
                 return true;
             }
         }
@@ -697,10 +851,11 @@ final class RuleEngine
         return false;
     }
 
-    private function containsTier2Keyword(string $text): bool
+    private function containsTier2(string $text): bool
     {
-        foreach ($this->tier2Keywords() as $kw) {
-            if (stripos($text, $kw) !== false) {
+        $haystack = mb_strtolower($text);
+        foreach ($this->tier2() as $term) {
+            if (str_contains($haystack, mb_strtolower($term))) {
                 return true;
             }
         }
@@ -708,18 +863,35 @@ final class RuleEngine
         return false;
     }
 
-    private function tier1Keywords(): array
+    /** @return array<int, string> */
+    private function tier1(): array
     {
-        return ['maxwin', 'rtp slot', 'situs slot', 'togel', 'bandar', 'gacor', 'judi online', 'link alternatif', 'scatter hitam'];
+        $tier = Config::get('sentinel.detection_keywords.tier1', []);
+
+        return is_array($tier) ? array_values($tier) : [];
     }
 
-    private function tier2Keywords(): array
+    /** @return array<int, string> */
+    private function tier2(): array
     {
-        return ['jackpot', 'casino', 'betting', 'slot', 'rtp', 'deposit', 'withdraw', 'taruhan'];
+        $tier = Config::get('sentinel.detection_keywords.tier2', []);
+
+        return is_array($tier) ? array_values($tier) : [];
     }
 
-    private function normalize(string $text): string
+    /** @return array<int, string> */
+    private function tier3(): array
     {
-        return mb_strtolower(trim($text));
+        $tier = Config::get('sentinel.detection_keywords.tier3', []);
+
+        return is_array($tier) ? array_values($tier) : [];
+    }
+
+    /** @param array<int, Signal> $signals */
+    private function push(array &$signals, ?Signal $signal): void
+    {
+        if ($signal !== null) {
+            $signals[] = $signal;
+        }
     }
 }

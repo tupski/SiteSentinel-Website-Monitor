@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Monitor;
 
 use App\Models\Website;
+use App\Services\Detection\ContentExtractor;
 use App\Services\Security\SsrfGuard;
 use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\UriResolver;
@@ -17,10 +18,14 @@ final class Probe
 {
     private PendingRequest $http;
 
+    private ContentExtractor $extractor;
+
     public function __construct(
         private array $config = [],
         ?HttpFactory $httpFactory = null,
+        ?ContentExtractor $extractor = null,
     ) {
+        $this->extractor = $extractor ?? new ContentExtractor;
         $this->http = ($httpFactory ?? app(HttpFactory::class))
             ->timeout($this->config['request_timeout'] ?? 30)
             ->connectTimeout($this->config['connect_timeout'] ?? 10)
@@ -91,6 +96,7 @@ final class Probe
                 return $this->failure('RESPONSE_TOO_LARGE', 'Response body exceeded limit.');
             }
             $size = strlen($body);
+            $extraction = $this->extractor->extract($body, $currentUrl);
 
             return new ProbeResult(
                 success: $status >= 200 && $status < 400,
@@ -108,9 +114,9 @@ final class Probe
                 redirectChain: $chain,
                 body: $body,
                 headers: $response->headers() ?? [],
-                extractedKeywords: $this->extractKeywords($body),
-                extractedDomains: $this->extractDomains($body, $currentUrl),
-                suspiciousPatterns: $this->extractSuspiciousPatterns($body),
+                extractedKeywords: $extraction['keywords'],
+                extractedDomains: $extraction['external_domains'],
+                suspiciousPatterns: $extraction['suspicious_patterns'],
             );
         }
     }
@@ -217,54 +223,5 @@ final class Probe
         }
 
         return $this->failure('REQUEST_ERROR', $message);
-    }
-
-    private function extractKeywords(string $body): array
-    {
-        $text = strtolower(strip_tags($body));
-        $tier1 = ['maxwin', 'rtp slot', 'situs slot', 'togel', 'bandar', 'gacor', 'judi online', 'link alternatif', 'scatter hitam'];
-        $found = [];
-        foreach ($tier1 as $kw) {
-            if (str_contains($text, $kw)) {
-                $found[] = $kw;
-            }
-        }
-
-        return $found;
-    }
-
-    private function extractDomains(string $body, string $baseUrl): array
-    {
-        $domains = [];
-        $baseHost = parse_url($baseUrl, PHP_URL_HOST);
-        if (preg_match_all('/href=["\'](https?:\/\/[^"\']+)["\']/i', $body, $matches)) {
-            foreach ($matches[1] as $url) {
-                $host = parse_url($url, PHP_URL_HOST);
-                if ($host && $host !== $baseHost) {
-                    $domains[] = $host;
-                }
-            }
-        }
-
-        return array_values(array_unique($domains));
-    }
-
-    private function extractSuspiciousPatterns(string $body): array
-    {
-        $patterns = [];
-        $text = strtolower(strip_tags($body));
-        $doorway = ['daftar', 'link alternatif', 'login', 'situs slot', 'maxwin'];
-        foreach ($doorway as $kw) {
-            if (str_contains($text, $kw)) {
-                $patterns['doorway'] = true;
-                break;
-            }
-        }
-
-        if (str_contains($body, 'display:none') || str_contains($body, 'visibility:hidden')) {
-            $patterns['hidden_elements'] = true;
-        }
-
-        return $patterns;
     }
 }

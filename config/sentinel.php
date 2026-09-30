@@ -81,6 +81,53 @@ return [
         'default_category_cap' => (int) env('SENTINEL_CATEGORY_CAP', 12),
     ],
 
+    /*
+    |----------------------------------------------------------------------
+    | Detection — suspicious keyword dictionary (DETECTION-RULES §8.6)
+    |----------------------------------------------------------------------
+    |
+    | Tiered by signal strength. These are the code-defined defaults mirrored
+    | into detection_rules.config (JSON) for tunability (ADR-008, DATABASE §3.8).
+    | Tier-3 terms act as corroborators only and can never escalate past INFO.
+    |
+    */
+    'detection_keywords' => [
+        'tier1' => [
+            'maxwin', 'rtp slot', 'situs slot', 'togel', 'bandar',
+            'gacor', 'judi online', 'link alternatif', 'scatter hitam',
+        ],
+        'tier2' => [
+            'jackpot', 'casino', 'betting', 'slot', 'rtp',
+            'deposit', 'withdraw', 'taruhan',
+        ],
+        'tier3' => [
+            'bonus', 'game', 'promo', 'hadiah', 'menang',
+        ],
+
+        // Tier-2 density threshold: rate >= max(3 * baseline_rate, this floor) (DETECTION-RULES §8.6)
+        'tier2_density_floor' => (float) env('SENTINEL_TIER2_DENSITY_FLOOR', 0.002),
+
+        // Per-website keyword suppression applied before any rule evaluation (FR-47)
+        'ignored_global' => [],
+    ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Detection — external link controls (DETECTION-RULES §8.7, §7.2)
+    |----------------------------------------------------------------------
+    */
+    'links' => [
+        // Domains never treated as "new" or suspicious for any website
+        'ignored_domains_global' => [
+            'google.com', 'googleapis.com', 'gstatic.com', 'facebook.com',
+            'twitter.com', 'instagram.com', 'youtube.com', 'linkedin.com',
+            'wikipedia.org', 'cloudflare.com', 'schema.org', 'w3.org',
+        ],
+
+        // TLDs treated as suspicious for redirect targets and outbound links
+        'suspicious_tlds' => ['.top', '.xyz', '.click', '.loan', '.bid', '.download'],
+    ],
+
     'notifications' => [
         // Global default cooldown window between repeat alerts for website+channel (NOTIFICATIONS §9.2)
         'default_cooldown_minutes' => (int) env('SENTINEL_DEFAULT_COOLDOWN_MINUTES', 15),

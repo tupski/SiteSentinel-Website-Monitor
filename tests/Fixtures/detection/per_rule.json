@@ -1,0 +1,1290 @@
+{
+  "description": "Per-rule regression corpus (DETECTION-RULES 11.1-11.3). Each case declares the checks / check_extractions / website_baselines columns it populates so the doubles stay aligned with DATABASE.md.",
+  "columns_populated": {
+    "checks": [
+      "http_status",
+      "final_url",
+      "title",
+      "content_hash",
+      "response_size_bytes",
+      "ssl_valid",
+      "ssl_issuer",
+      "ssl_expires_at",
+      "error_type",
+      "error_message",
+      "duration_ms",
+      "redirect_chain",
+      "availability_state"
+    ],
+    "check_extractions": [
+      "keywords",
+      "external_domains",
+      "suspicious_patterns"
+    ],
+    "website_baselines": [
+      "http_status",
+      "final_url",
+      "title",
+      "content_hash",
+      "response_size_bytes",
+      "keyword_counts",
+      "external_link_count",
+      "external_domains",
+      "ssl_valid",
+      "ssl_issuer",
+      "ssl_expires_at"
+    ],
+    "suspicious_patterns": [
+      "visible_text_length",
+      "hidden_text_length",
+      "hidden_keywords",
+      "hidden_anchors",
+      "doorway",
+      "new_script_src",
+      "obfuscated_inline"
+    ]
+  },
+  "cases": [
+    {
+      "id": "clean",
+      "rule": "none",
+      "kind": "negative",
+      "website": {
+        "monitor_ssl": true,
+        "monitor_redirects": true,
+        "monitor_content": true,
+        "monitor_security": true
+      },
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+40d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+40d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "av_001_5xx",
+      "rule": "RULE-AV-001",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 503,
+        "final_url": "https://example.com",
+        "title": "",
+        "content_hash": null,
+        "availability_state": "DOWN",
+        "error_type": "server_error"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-AV-001"
+        ],
+        "score": 8,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "ssl_001_expired_plus_new_domain",
+      "rule": "RULE-SSL-001+RULE-LNK-001",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": false,
+        "ssl_expires_at": "-1d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "external_domains": [
+          "example.org",
+          "evil.example"
+        ]
+      },
+      "expect": {
+        "signals": [
+          "RULE-SSL-001",
+          "RULE-LNK-001"
+        ],
+        "score": 15,
+        "categories": 2,
+        "security_state": "INCIDENT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "red_005_https_downgrade",
+      "rule": "RULE-RED-005",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "http://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "redirect_chain": [
+          {
+            "url": "https://example.com",
+            "status": 301,
+            "to_url": "http://example.com"
+          }
+        ],
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-RED-001",
+          "RULE-RED-005"
+        ],
+        "score": 20,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": true
+      }
+    },
+    {
+      "id": "red_006_ssrf_redirect",
+      "rule": "RULE-RED-006",
+      "kind": "positive",
+      "website": {
+        "monitor_content": false
+      },
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "http://169.254.169.254/",
+        "title": "",
+        "content_hash": null,
+        "error_type": "ssrf_blocked",
+        "redirect_chain": [
+          {
+            "url": "https://example.com",
+            "status": 302,
+            "to_url": "http://169.254.169.254/"
+          }
+        ],
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-RED-001",
+          "RULE-RED-005",
+          "RULE-RED-006"
+        ],
+        "score": 34,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": true
+      }
+    },
+    {
+      "id": "cnt_001_hash_drift",
+      "rule": "RULE-CNT-001",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_CHANGED",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-CNT-001"
+        ],
+        "score": 1,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "cnt_002_title_replaced_tier1",
+      "rule": "RULE-CNT-002",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Situs Slot Gacor Maxwin",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "maxwin": 1,
+          "situs slot": 1,
+          "gacor": 1
+        },
+        "suspicious_patterns": {
+          "visible_text_length": 800
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-CNT-002",
+          "RULE-KW-001",
+          "RULE-KW-004"
+        ],
+        "score": 19,
+        "categories": 2,
+        "security_state": "INCIDENT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "cnt_004_empty_page",
+      "rule": "RULE-CNT-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_SMALL",
+        "response_size_bytes": 100,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-CNT-001",
+          "RULE-CNT-003",
+          "RULE-CNT-004"
+        ],
+        "score": 8,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "cnt_004_boundary_at_512",
+      "rule": "RULE-CNT-004",
+      "kind": "boundary",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H512",
+        "response_size_bytes": 512,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "cnt_005_hidden_block",
+      "rule": "RULE-CNT-005",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 600
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-CNT-005"
+        ],
+        "score": 5,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "kw_005_hidden_keyword",
+      "rule": "RULE-KW-005",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "maxwin": 1
+        },
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [
+            "maxwin"
+          ]
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-KW-001",
+          "RULE-KW-005"
+        ],
+        "score": 6,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "kw_005_negative_visible",
+      "rule": "RULE-KW-005",
+      "kind": "negative",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "maxwin": 1
+        },
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": []
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-KW-001"
+        ],
+        "score": 1,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "kw_003_tier2_density",
+      "rule": "RULE-KW-003",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "jackpot": 3,
+          "casino": 3
+        },
+        "suspicious_patterns": {
+          "visible_text_length": 1000
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-KW-003"
+        ],
+        "score": 3,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "lnk_001_new_domain",
+      "rule": "RULE-LNK-001",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 1,
+        "external_domains": [
+          "example.org"
+        ],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "external_domains": [
+          "example.org",
+          "brand-new.example"
+        ]
+      },
+      "expect": {
+        "signals": [
+          "RULE-LNK-001"
+        ],
+        "score": 3,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "lnk_001_negative_unchanged_same_domains",
+      "rule": "RULE-LNK-001",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "www.example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ]
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "lnk_004_hidden_anchor",
+      "rule": "RULE-LNK-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 1,
+        "external_domains": [
+          "example.org"
+        ],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "external_domains": [
+          "example.org",
+          "link-alternatif.top"
+        ],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_anchors": [
+            "link-alternatif.top"
+          ]
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-LNK-001",
+          "RULE-LNK-002",
+          "RULE-LNK-004"
+        ],
+        "score": 17,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": true
+      }
+    },
+    {
+      "id": "lnk_003_checkout_pages",
+      "rule": "RULE-LNK-003",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "external_domains": [
+          "shop-0.example",
+          "shop-1.example",
+          "shop-2.example",
+          "shop-3.example",
+          "shop-4.example",
+          "shop-5.example",
+          "shop-6.example",
+          "shop-7.example",
+          "shop-8.example",
+          "shop-9.example",
+          "shop-10.example",
+          "shop-11.example",
+          "shop-12.example",
+          "shop-13.example",
+          "shop-14.example",
+          "shop-15.example",
+          "shop-16.example",
+          "shop-17.example",
+          "shop-18.example",
+          "shop-19.example",
+          "shop-20.example",
+          "shop-21.example",
+          "shop-22.example",
+          "shop-23.example",
+          "shop-24.example",
+          "shop-25.example",
+          "shop-26.example",
+          "shop-27.example",
+          "shop-28.example",
+          "shop-29.example",
+          "shop-30.example",
+          "shop-31.example",
+          "shop-32.example",
+          "shop-33.example",
+          "shop-34.example",
+          "shop-35.example",
+          "shop-36.example",
+          "shop-37.example",
+          "shop-38.example",
+          "shop-39.example",
+          "shop-40.example",
+          "shop-41.example",
+          "shop-42.example",
+          "shop-43.example",
+          "shop-44.example",
+          "shop-45.example",
+          "shop-46.example",
+          "shop-47.example",
+          "shop-48.example",
+          "shop-49.example"
+        ]
+      },
+      "expect": {
+        "signals": [
+          "RULE-LNK-001",
+          "RULE-LNK-003",
+          "RULE-LNK-005"
+        ],
+        "score": 17,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": true
+      }
+    },
+    {
+      "id": "seo_001_doorway",
+      "rule": "RULE-SEO-001",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "doorway": true
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-SEO-001"
+        ],
+        "score": 3,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "seo_004_script_injection",
+      "rule": "RULE-SEO-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "new_script_src": true,
+          "obfuscated_inline": true
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-KW-005",
+          "RULE-SEO-004"
+        ],
+        "score": 9,
+        "categories": 2,
+        "security_state": "SUSPECT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "av_002_unexpected_status",
+      "rule": "RULE-AV-002",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 404,
+        "final_url": "https://example.com",
+        "title": "",
+        "content_hash": null,
+        "availability_state": "DOWN"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-AV-002"
+        ],
+        "score": 6,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "av_003_timeout",
+      "rule": "RULE-AV-003",
+      "kind": "positive",
+      "website": {
+        "monitor_content": false,
+        "monitor_security": false
+      },
+      "baseline": null,
+      "check": {
+        "http_status": null,
+        "final_url": null,
+        "title": null,
+        "content_hash": null,
+        "error_type": "timeout",
+        "error_message": "cURL error 28",
+        "availability_state": "DOWN"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-AV-003"
+        ],
+        "score": 8,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "av_004_dns_failure",
+      "rule": "RULE-AV-004",
+      "kind": "positive",
+      "website": {
+        "monitor_content": false,
+        "monitor_security": false
+      },
+      "baseline": null,
+      "check": {
+        "http_status": null,
+        "final_url": null,
+        "title": null,
+        "content_hash": null,
+        "error_type": "dns_failure",
+        "error_message": "cURL error 6",
+        "availability_state": "DOWN"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-AV-004"
+        ],
+        "score": 9,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "av_005_connection_refused",
+      "rule": "RULE-AV-005",
+      "kind": "positive",
+      "website": {
+        "monitor_content": false,
+        "monitor_security": false
+      },
+      "baseline": null,
+      "check": {
+        "http_status": null,
+        "final_url": null,
+        "title": null,
+        "content_hash": null,
+        "error_type": "connection_refused",
+        "error_message": "cURL error 7",
+        "availability_state": "DOWN"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-AV-005"
+        ],
+        "score": 9,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "av_006_slow_response",
+      "rule": "RULE-AV-006",
+      "kind": "positive",
+      "website": {
+        "timeout_seconds": 10,
+        "monitor_content": false,
+        "monitor_security": false
+      },
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "",
+        "content_hash": null,
+        "duration_ms": 9000,
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-AV-006"
+        ],
+        "score": 1,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "ssl_002_hostname_mismatch",
+      "rule": "RULE-SSL-002",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "",
+        "content_hash": null,
+        "ssl_valid": false,
+        "ssl_expires_at": "+90d",
+        "error_message": "hostname mismatch",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-SSL-001",
+          "RULE-SSL-002"
+        ],
+        "score": 24,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": true
+      }
+    },
+    {
+      "id": "ssl_003_issuer_change",
+      "rule": "RULE-SSL-003",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_issuer": "Unknown CA",
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-SSL-003"
+        ],
+        "score": 3,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "ssl_004_expiring_soon",
+      "rule": "RULE-SSL-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "",
+        "content_hash": null,
+        "ssl_valid": true,
+        "ssl_expires_at": "+10d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-SSL-004"
+        ],
+        "score": 2,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "red_003_suspicious_tld",
+      "rule": "RULE-RED-003",
+      "kind": "positive",
+      "website": {
+        "expected_final_domain": "other.example"
+      },
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://parked.top/",
+        "title": "",
+        "content_hash": null,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "redirect_chain": [
+          {
+            "url": "https://example.com",
+            "status": 302,
+            "to_url": "https://parked.top/"
+          }
+        ],
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-RED-001",
+          "RULE-RED-002",
+          "RULE-RED-003"
+        ],
+        "score": 17,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": true
+      }
+    },
+    {
+      "id": "red_004_long_chain",
+      "rule": "RULE-RED-004",
+      "kind": "positive",
+      "website": {
+        "expected_final_domain": "example.com"
+      },
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com/landing",
+        "title": "",
+        "content_hash": null,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "redirect_chain": [
+          {
+            "url": "https://example.com",
+            "status": 301,
+            "to_url": "https://example.com/a"
+          },
+          {
+            "url": "https://example.com/a",
+            "status": 302,
+            "to_url": "https://example.com/b"
+          },
+          {
+            "url": "https://example.com/b",
+            "status": 302,
+            "to_url": "https://example.com/c"
+          },
+          {
+            "url": "https://example.com/c",
+            "status": 302,
+            "to_url": "https://example.com/landing"
+          }
+        ],
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-RED-004"
+        ],
+        "score": 3,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "cnt_003_size_ratio",
+      "rule": "RULE-CNT-003",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 1000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-CNT-003"
+        ],
+        "score": 2,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "kw_002_tier1_cluster",
+      "rule": "RULE-KW-002",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {
+          "maxwin": 1,
+          "rtp slot": 1,
+          "situs slot": 1,
+          "togel": 1,
+          "bandar": 1
+        },
+        "suspicious_patterns": {
+          "visible_text_length": 1000
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-KW-001",
+          "RULE-KW-002"
+        ],
+        "score": 5,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      }
+    },
+    {
+      "id": "lnk_005_mass_injection",
+      "rule": "RULE-LNK-005",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "external_link_count": 2,
+        "external_domains": [
+          "example.org",
+          "example.net"
+        ],
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "external_domains": [
+          "inject-0.example",
+          "inject-1.example",
+          "inject-2.example",
+          "inject-3.example",
+          "inject-4.example",
+          "inject-5.example",
+          "inject-6.example",
+          "inject-7.example",
+          "inject-8.example",
+          "inject-9.example",
+          "inject-10.example",
+          "inject-11.example",
+          "inject-12.example",
+          "inject-13.example",
+          "inject-14.example",
+          "inject-15.example",
+          "inject-16.example",
+          "inject-17.example",
+          "inject-18.example",
+          "inject-19.example"
+        ]
+      },
+      "expect": {
+        "signals": [
+          "RULE-LNK-001",
+          "RULE-LNK-005"
+        ],
+        "score": 12,
+        "categories": 1,
+        "security_state": "SUSPECT",
+        "guard_capped": false
+      }
+    }
+  ]
+}

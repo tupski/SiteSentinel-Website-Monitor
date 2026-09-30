@@ -217,11 +217,19 @@ Purpose: one row per monitoring cycle result — the primary telemetry record.
 | `availability_state` | ENUM('UP','DOWN') | yes | NULL |
 | `security_state` | ENUM('OK','INFO','SUSPECT','INCIDENT') | yes | NULL |
 | `score` | INT UNSIGNED | no | 0 |
+| `triggered_rules` | JSON | yes | NULL |
 | `created_at`/`updated_at` | TIMESTAMP | yes | NULL |
 
 Keys/indexes: PK `id`; FK `website_id`; `uq_checks_check_key` (`check_key`);
 `idx_checks_website_started_at` (`website_id`,`started_at`); `idx_checks_created_at`
 (`created_at`) for pruning; `idx_checks_availability_state` (`availability_state`).
+
+> **`triggered_rules`** (added in Phase 5) records the fired signals verbatim as
+> `{ "<RULE-ID>": { category, weight, confidence, reason } }` so attribution is reviewable
+> (`FR-49`, `DETECTION-RULES.md` §6.1) and so the §6.4 decay arithmetic can carry prior
+> signals forward at their own per-signal weights rather than from an aggregate score.
+> It is the rule-attribution analogue of `incidents.triggered_rules` and does not
+> duplicate any existing column.
 
 ### 3.7 `check_extractions`
 

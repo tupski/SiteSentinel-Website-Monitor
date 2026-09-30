@@ -17,9 +17,19 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Runs one monitoring check for a website (Phase 4 probe + Phase 5 detection).
+ *
+ * Idempotency (ARCHITECTURE.md 5.1, DETECTION-RULES 6.4): the check is keyed by
+ * a deterministic `check_key`. Re-running the same logical check reuses the
+ * existing row instead of violating the unique constraint, so a retried job
+ * converges on exactly one persisted result.
+ */
 final class RunWebsiteCheck implements ShouldQueue
 {
     use Dispatchable;
@@ -38,6 +48,7 @@ final class RunWebsiteCheck implements ShouldQueue
         $lock = Cache::lock('website-check:'.$this->website->id, 120);
 
         if (! $lock->get()) {
+            // Another worker is already checking this website.
             return;
         }
 
@@ -50,76 +61,93 @@ final class RunWebsiteCheck implements ShouldQueue
 
     private function run(Probe $probe, RuleEngine $engine, SnapshotWriter $snapshotWriter): void
     {
+        $key = $this->checkKey();
+
+        // Idempotency guard: an identical logical check was already persisted.
+        if (Check::where('check_key', $key)->exists()) {
+            return;
+        }
+
         $startedAt = now();
         $result = $probe->probe($this->website);
 
-        DB::transaction(function () use ($startedAt, $result, $engine, $snapshotWriter) {
-            $availabilityState = $result->success ? 'UP' : 'DOWN';
-
-            $check = Check::create([
-                'website_id' => $this->website->id,
-                'check_key' => $this->checkKey(),
-                'started_at' => $startedAt,
-                'finished_at' => now(),
-                'duration_ms' => $result->durationMs,
-                'http_status' => $result->httpStatus,
-                'final_url' => $result->finalUrl,
-                'resolved_ip' => $result->resolvedIp,
-                'redirect_chain' => $result->redirectChain,
-                'response_size_bytes' => $result->responseSizeBytes,
-                'ssl_valid' => $result->sslValid,
-                'ssl_issuer' => $result->sslIssuer,
-                'ssl_expires_at' => $result->sslExpiresAt,
-                'title' => $result->title,
-                'content_hash' => $result->contentHash,
-                'error_type' => $result->errorType,
-                'error_message' => $result->errorMessage,
-                'availability_state' => $availabilityState,
-            ]);
-
+        /** @var array{0: Check, 1: ?CheckExtraction} $persisted */
+        $persisted = DB::transaction(function () use ($key, $startedAt, $result, $engine) {
+            $check = $this->persistCheck($key, $startedAt, $result);
             $extraction = $this->persistExtraction($check, $result);
 
-            if ($result->success) {
-                $this->ensureBaseline($result);
-                $this->website->consecutive_successes = $this->website->consecutive_successes + 1;
-                $this->website->consecutive_failures = 0;
-            } else {
-                $this->website->consecutive_failures = $this->website->consecutive_failures + 1;
-                $this->website->consecutive_successes = 0;
-            }
+            $this->updateCounters($result);
 
-            $baseline = $this->website->currentBaseline;
-            $priorChecks = Check::where('website_id', $this->website->id)
-                ->where('id', '<', $check->id)
-                ->orderBy('id', 'desc')
-                ->limit(3)
-                ->get();
+            $detection = $engine->evaluate(
+                $this->website,
+                $check,
+                $extraction,
+                $this->website->currentBaseline,
+                $this->priorChecks($check),
+            );
 
-            $detectionResult = $engine->evaluate($this->website, $check, $extraction, $baseline, $priorChecks);
-
-            $check->security_state = $detectionResult->securityState;
-            $check->score = $detectionResult->score;
+            $check->security_state = $detection->securityState;
+            $check->score = $detection->score;
+            $check->triggered_rules = $detection->triggeredRules();
             $check->save();
-
-            if (in_array($detectionResult->securityState, ['SUSPECT', 'INCIDENT'], true)) {
-                $snapshotWriter->capture($check, ['body' => $result->body ?? ''], $result->headers ?? []);
-            }
 
             $this->website->last_checked_at = now();
             $this->website->next_check_at = now()->addSeconds($this->website->check_interval_seconds);
-            $this->website->status_availability = $availabilityState;
-            $this->website->status_security = $detectionResult->securityState;
+            $this->website->status_availability = $check->availability_state;
+            $this->website->status_security = $detection->securityState;
             $this->website->save();
+
+            return [$check, $extraction];
         });
+
+        [$check, $extraction] = $persisted;
+
+        // Snapshot capture is a side effect and must never roll back the check
+        // (AGENTS.md 9). It runs outside the transaction.
+        if (in_array($check->security_state, ['SUSPECT', 'INCIDENT'], true)) {
+            $snapshotWriter->capture(
+                $check,
+                (string) ($result->body ?? ''),
+                is_array($result->headers) ? $result->headers : [],
+                [
+                    'keywords' => $extraction?->keywords,
+                    'external_links' => $extraction?->external_domains,
+                ],
+            );
+        }
+    }
+
+    private function persistCheck(string $key, Carbon $startedAt, ProbeResult $result): Check
+    {
+        return Check::create([
+            'website_id' => $this->website->id,
+            'check_key' => $key,
+            'started_at' => $startedAt,
+            'finished_at' => now(),
+            'duration_ms' => $result->durationMs,
+            'http_status' => $result->httpStatus,
+            'final_url' => $result->finalUrl,
+            'resolved_ip' => $result->resolvedIp,
+            'redirect_chain' => $result->redirectChain,
+            'response_size_bytes' => $result->responseSizeBytes,
+            'ssl_valid' => $result->sslValid,
+            'ssl_issuer' => $result->sslIssuer,
+            'ssl_expires_at' => $result->sslExpiresAt,
+            'title' => $result->title,
+            'content_hash' => $result->contentHash,
+            'error_type' => $result->errorType,
+            'error_message' => $result->errorMessage,
+            'availability_state' => $result->success ? 'UP' : 'DOWN',
+        ]);
     }
 
     private function persistExtraction(Check $check, ProbeResult $result): ?CheckExtraction
     {
         $keywords = $result->extractedKeywords ?? [];
         $domains = $result->extractedDomains ?? [];
-        $suspicious = $result->suspiciousPatterns ?? [];
+        $patterns = $result->suspiciousPatterns ?? [];
 
-        if ($keywords === [] && $domains === [] && $suspicious === []) {
+        if ($keywords === [] && $domains === [] && $patterns === []) {
             return null;
         }
 
@@ -128,8 +156,30 @@ final class RunWebsiteCheck implements ShouldQueue
             'website_id' => $this->website->id,
             'keywords' => $keywords,
             'external_domains' => $domains,
-            'suspicious_patterns' => $suspicious,
+            'suspicious_patterns' => $patterns,
         ]);
+    }
+
+    private function updateCounters(ProbeResult $result): void
+    {
+        if ($result->success) {
+            $this->ensureBaseline($result);
+            $this->website->consecutive_successes = $this->website->consecutive_successes + 1;
+            $this->website->consecutive_failures = 0;
+        } else {
+            $this->website->consecutive_failures = $this->website->consecutive_failures + 1;
+            $this->website->consecutive_successes = 0;
+        }
+    }
+
+    /** @return Collection<int, Check> */
+    private function priorChecks(Check $check): Collection
+    {
+        return Check::where('website_id', $this->website->id)
+            ->where('id', '<', $check->id)
+            ->orderByDesc('id')
+            ->limit(RuleEngine::LOOKBACK_CHECKS)
+            ->get();
     }
 
     private function checkKey(): string
@@ -143,6 +193,9 @@ final class RunWebsiteCheck implements ShouldQueue
             return;
         }
 
+        $domains = is_array($result->extractedDomains) ? $result->extractedDomains : [];
+        $keywords = is_array($result->extractedKeywords) ? $result->extractedKeywords : [];
+
         $baseline = WebsiteBaseline::create([
             'website_id' => $this->website->id,
             'version' => 1,
@@ -153,8 +206,9 @@ final class RunWebsiteCheck implements ShouldQueue
             'content_hash' => $result->contentHash,
             'hash_algorithm' => 'sha256',
             'response_size_bytes' => $result->responseSizeBytes,
-            'external_link_count' => count($result->extractedDomains ?? []),
-            'external_domains' => $result->extractedDomains ?? [],
+            'keyword_counts' => $keywords,
+            'external_link_count' => count($domains),
+            'external_domains' => array_values($domains),
             'ssl_valid' => $result->sslValid,
             'ssl_issuer' => $result->sslIssuer,
             'ssl_expires_at' => $result->sslExpiresAt,

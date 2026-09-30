@@ -1,0 +1,5 @@
+{
+  "RULE-SSL-005": "SSL monitoring disabled (visibility only; default_weight 0 contributes nothing)",
+  "RULE-SEO-002": "Cloaking indicator - Future per 8.8, shipped disabled",
+  "RULE-SEO-003": "Sitemap/robots anomaly - Future per 8.8, shipped disabled"
+}

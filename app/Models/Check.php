@@ -34,6 +34,7 @@ final class Check extends Model
         'availability_state',
         'security_state',
         'score',
+        'triggered_rules',
     ];
 
     protected function casts(): array
@@ -47,6 +48,7 @@ final class Check extends Model
             'availability_state' => 'string',
             'security_state' => 'string',
             'score' => 'integer',
+            'triggered_rules' => 'array',
         ];
     }
 

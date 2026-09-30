@@ -21,8 +21,10 @@ final class WebsiteBaseline extends Model
         'title',
         'content_hash',
         'hash_algorithm',
+        'response_size_bytes',
         'keyword_counts',
         'external_link_count',
+        'external_domains',
         'ssl_valid',
         'ssl_issuer',
         'ssl_expires_at',
@@ -37,6 +39,11 @@ final class WebsiteBaseline extends Model
             'ssl_expires_at' => 'datetime',
             'captured_at' => 'datetime',
             'keyword_counts' => 'array',
+            'external_domains' => 'array',
+            'response_size_bytes' => 'integer',
+            'external_link_count' => 'integer',
+            'version' => 'integer',
+            'http_status' => 'integer',
         ];
     }
 
