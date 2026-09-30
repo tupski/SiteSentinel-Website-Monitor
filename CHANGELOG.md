@@ -2,6 +2,13 @@
 
 ## [2026-09-30]
 
+### Fixed (Phase 5 final verification)
+- `RULE-SSL-004` now emits its canonical graduated tiers (DETECTION-RULES 8.2): `<= 7` days tier 7 (CRITICAL-eligible), `<= 14` tier 14 (WARNING band), `<= 30` tier 30 (INFO band), silent beyond 30 days. The tier is carried in the signal evidence; scoring remains weight x confidence and the correlation guard still applies at the CRITICAL-eligible tier.
+- `RULE-SEO-004` now compares script sources against the baseline (canonical 8.8 `host(script.src) not in baseline_domains`): a script host already absorbed into `website_baselines.external_domains` no longer fires; off-baseline hosts fire with `new_script_src` evidence. Baseline evidence reuses the existing canonical column; no schema change.
+- `checks.triggered_rules` (FR-49) is retained and documented in `DATABASE.md` 3.6 per AGENTS.md 8 ("every schema change requires a migration + a doc update + a test"); the attribution test proves the stored map reproduces the stored score.
+
+## [2026-09-30]
+
 ### Fixed (Phase 5 remediation)
 - `WebsiteBaseline` now persists `response_size_bytes` and `external_domains` (mass-assignment defect) so `RULE-CNT-003` and baseline link comparison can function.
 - External-domain comparison now reads the canonical `website_baselines.external_domains` column via `BaselineComparator` with deterministic host normalisation (`www` stripping, lower-casing, URL→host), instead of a never-written `keyword_counts['_external_domains']` key.

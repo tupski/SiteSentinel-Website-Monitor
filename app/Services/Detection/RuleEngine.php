@@ -79,7 +79,7 @@ final class RuleEngine
             }
 
             if ($website->monitor_security) {
-                $signals = array_merge($signals, $this->evaluateSeoPatterns($website, $check, $extraction));
+                $signals = array_merge($signals, $this->evaluateSeoPatterns($website, $check, $baseline, $extraction));
             }
         }
 
@@ -293,11 +293,25 @@ final class RuleEngine
             ]));
         }
 
+        // RULE-SSL-004 - graduated windows (DETECTION-RULES 8.2):
+        // <= 7 days CRITICAL-eligible, <= 14 WARNING, <= 30 INFO. The registry
+        // severity stays at the canonical INFO default; the tier is carried in
+        // evidence because the weighted scoring model is driven by
+        // weight x confidence, not severity. Even at the <= 7 tier the
+        // correlation guard still applies (8.2 Threshold note).
         if ($check->ssl_valid !== false && $check->ssl_expires_at !== null) {
             $secondsUntil = $check->ssl_expires_at->getTimestamp() - now()->getTimestamp();
             $days = (int) floor($secondsUntil / 86400);
-            if ($days <= 30) {
-                $this->push($signals, $this->emit('RULE-SSL-004', 'ssl', 'medium', "Certificate expires in {$days} day(s)", ['days' => $days]));
+            $tier = null;
+            if ($days <= 7) {
+                $tier = 7;
+            } elseif ($days <= 14) {
+                $tier = 14;
+            } elseif ($days <= 30) {
+                $tier = 30;
+            }
+            if ($tier !== null) {
+                $this->push($signals, $this->emit('RULE-SSL-004', 'ssl', 'medium', "Certificate expires in {$days} day(s) (tier {$tier})", ['days' => $days, 'tier' => $tier]));
             }
         }
 
@@ -583,7 +597,7 @@ final class RuleEngine
     */
 
     /** @return array<int, Signal> */
-    private function evaluateSeoPatterns(Website $website, Check $check, ?CheckExtraction $extraction): array
+    private function evaluateSeoPatterns(Website $website, Check $check, ?WebsiteBaseline $baseline, ?CheckExtraction $extraction): array
     {
         $signals = [];
 
@@ -597,10 +611,28 @@ final class RuleEngine
             $this->push($signals, $this->emit('RULE-SEO-001', 'seo-pattern', 'medium', 'Spam SEO doorway pattern'));
         }
 
-        if (! empty($patterns['new_script_src']) || ! empty($patterns['obfuscated_inline'])) {
+        // RULE-SEO-004 (DETECTION-RULES 8.8): a script source is new when its
+        // host is neither the monitored host nor a host already absorbed into
+        // the baseline (baseline_script_srcs()/baseline_domains in the canonical
+        // logic). Off-baseline obfuscated inline script also fires.
+        $knownHosts = $this->baselineScriptHosts($baseline);
+        $scriptSrcs = is_array($patterns['script_srcs'] ?? null) ? $patterns['script_srcs'] : [];
+
+        $newSrcs = [];
+        foreach ($scriptSrcs as $src) {
+            $host = BaselineComparator::normalizeDomain((string) $src);
+            if ($host !== '' && ! in_array($host, $knownHosts, true)) {
+                $newSrcs[] = $host;
+            }
+        }
+        sort($newSrcs);
+
+        $obfuscated = ! empty($patterns['obfuscated_inline']);
+
+        if ($newSrcs !== [] || $obfuscated) {
             $this->push($signals, $this->emit('RULE-SEO-004', 'seo-pattern', 'medium', 'Suspicious script injection', [
-                'third_party_script' => (bool) ($patterns['new_script_src'] ?? false),
-                'obfuscated_inline' => (bool) ($patterns['obfuscated_inline'] ?? false),
+                'new_script_src' => $newSrcs,
+                'obfuscated_inline' => $obfuscated,
             ]));
         }
 
@@ -830,6 +862,31 @@ final class RuleEngine
     private function isIgnored(string $term, array $ignored): bool
     {
         return in_array(mb_strtolower(trim($term)), $ignored, true);
+    }
+
+    /**
+     * Hosts the baseline already knows about (canonical `baseline_script_srcs()`
+     * / `baseline_domains` for RULE-SEO-004): the baseline's external domain
+     * set. Schema-faithful - reuses the existing
+     * `website_baselines.external_domains` column, no new columns.
+     *
+     * @return array<int, string>
+     */
+    private function baselineScriptHosts(?WebsiteBaseline $baseline): array
+    {
+        $hosts = [];
+
+        if ($baseline !== null) {
+            $domains = is_array($baseline->external_domains) ? $baseline->external_domains : [];
+            foreach ($domains as $domain) {
+                $normalized = BaselineComparator::normalizeDomain((string) $domain);
+                if ($normalized !== '') {
+                    $hosts[$normalized] = true;
+                }
+            }
+        }
+
+        return array_keys($hosts);
     }
 
     /** @return array<int, string> */

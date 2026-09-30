@@ -2550,6 +2550,286 @@
         "guard_capped": false
       },
       "note": "a normal 200 response with a full body is not an empty/unreachable page"
+    },
+    {
+      "id": "ssl_004_tier7_critical_eligible",
+      "rule": "RULE-SSL-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+6d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-SSL-004"
+        ],
+        "score": 2,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "6 days: tier 7, CRITICAL-eligible but guard still applies"
+    },
+    {
+      "id": "ssl_004_tier14_warning",
+      "rule": "RULE-SSL-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+11d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-SSL-004"
+        ],
+        "score": 2,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "11 days: tier 14, WARNING band"
+    },
+    {
+      "id": "ssl_004_tier30_info",
+      "rule": "RULE-SSL-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+21d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-SSL-004"
+        ],
+        "score": 2,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "21 days: tier 30, INFO band"
+    },
+    {
+      "id": "ssl_004_tier7_boundary_at_8d",
+      "rule": "RULE-SSL-004",
+      "kind": "boundary",
+      "website": {},
+      "baseline": null,
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+8d",
+        "availability_state": "UP"
+      },
+      "extraction": {},
+      "expect": {
+        "signals": [
+          "RULE-SSL-004"
+        ],
+        "score": 2,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "8 days is outside tier 7 but inside tier 14"
+    },
+    {
+      "id": "seo_004_baseline_script_no_false_positive",
+      "rule": "RULE-SEO-004",
+      "kind": "negative",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 1,
+        "external_domains": [
+          "analytics.example"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false,
+          "script_srcs": [
+            "analytics.example"
+          ]
+        }
+      },
+      "expect": {
+        "signals": [],
+        "score": 0,
+        "categories": 0,
+        "security_state": "OK",
+        "guard_capped": false
+      },
+      "note": "script host absorbed into the baseline must not fire"
+    },
+    {
+      "id": "seo_004_new_script_source",
+      "rule": "RULE-SEO-004",
+      "kind": "positive",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 1,
+        "external_domains": [
+          "analytics.example"
+        ],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false,
+          "script_srcs": [
+            "analytics.example",
+            "cdn.attacker.example"
+          ]
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-SEO-004"
+        ],
+        "score": 4,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "off-baseline script host is a new_script_src signal"
+    },
+    {
+      "id": "seo_004_empty_baseline_all_scripts_new",
+      "rule": "RULE-SEO-004",
+      "kind": "boundary",
+      "website": {},
+      "baseline": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "keyword_counts": {},
+        "external_link_count": 0,
+        "external_domains": [],
+        "ssl_valid": true,
+        "ssl_issuer": "Let's Encrypt",
+        "ssl_expires_at": "+90d"
+      },
+      "check": {
+        "http_status": 200,
+        "final_url": "https://example.com",
+        "title": "Example",
+        "content_hash": "H_BODY",
+        "response_size_bytes": 2000,
+        "ssl_valid": true,
+        "ssl_expires_at": "+90d",
+        "availability_state": "UP"
+      },
+      "extraction": {
+        "keywords": {},
+        "external_domains": [],
+        "suspicious_patterns": {
+          "visible_text_length": 1000,
+          "hidden_text_length": 0,
+          "hidden_keywords": [],
+          "hidden_anchors": [],
+          "doorway": false,
+          "new_script_src": false,
+          "obfuscated_inline": false,
+          "script_srcs": [
+            "analytics.example"
+          ]
+        }
+      },
+      "expect": {
+        "signals": [
+          "RULE-SEO-004"
+        ],
+        "score": 4,
+        "categories": 1,
+        "security_state": "INFO",
+        "guard_capped": false
+      },
+      "note": "empty baseline: every script host is new; deterministic"
     }
   ]
 }

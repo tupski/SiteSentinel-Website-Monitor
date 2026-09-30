@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\Config;
  *      hidden_keywords      array<int,string>
  *      hidden_anchors       array<int,string>  domains behind CSS-hidden anchors
  *      doorway              bool
+ *      script_srcs          array<int,string> hosts of external scripts
  *      new_script_src       bool
  *      obfuscated_inline    bool
  */
@@ -51,6 +52,7 @@ final class ContentExtractor
                 'hidden_keywords' => $this->termsIn($hiddenText, $this->tier1()),
                 'hidden_anchors' => $this->hiddenAnchorDomains($html, $baseHost),
                 'doorway' => $this->looksLikeDoorway($html),
+                'script_srcs' => $this->scriptSrcs($html),
                 'new_script_src' => $this->hasThirdPartyScript($html, $baseHost),
                 'obfuscated_inline' => $this->hasInlineObfuscation($html),
             ],
@@ -211,6 +213,29 @@ final class ContentExtractor
         }
 
         return $markers >= 3;
+    }
+
+    /**
+     * All external script sources on the page (RULE-SEO-004 evidence).
+     *
+     * @return array<int,string> normalised, sorted, de-duplicated hosts
+     */
+    public function scriptSrcs(string $html): array
+    {
+        $hosts = [];
+        if (preg_match_all('/<script\b[^>]*src\s*=\s*"([^"]+)"/i', $html, $matches) !== false) {
+            foreach ($matches[1] as $src) {
+                $host = BaselineComparator::domainFromUrl($src);
+                if ($host !== '') {
+                    $hosts[$host] = true;
+                }
+            }
+        }
+
+        $result = array_keys($hosts);
+        sort($result);
+
+        return $result;
     }
 
     private function hasThirdPartyScript(string $html, string $baseHost): bool
