@@ -746,11 +746,11 @@ Deliver the incident engine: creation on threshold cross, dedupe/merge against o
 
 ### Definition of Done
 
-- [ ] `AC-6-01` … `AC-6-07` met.
-- [ ] Lifecycle terminal semantics enforced (asserted by test).
-- [ ] `incidents`/`incident_events` match [`DATABASE.md`](DATABASE.md).
-- [ ] CI green; no regression to Phase 5.
-- [ ] Docs updated if lifecycle deviated from [`PRD.md`](PRD.md) §12.1.
+- [x] `AC-6-01` … `AC-6-07` met.
+- [x] Lifecycle terminal semantics enforced (asserted by test).
+- [x] `incidents`/`incident_events` match [`DATABASE.md`](DATABASE.md).
+- [x] CI green; no regression to Phase 5.
+- [x] Docs updated if lifecycle deviated from [`PRD.md`](PRD.md) §12.1. (No deviation; CHANGELOG.md records the delivery.)
 
 ### Risks / Watch-outs
 

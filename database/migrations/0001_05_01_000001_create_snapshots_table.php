@@ -14,8 +14,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('website_id')->constrained('websites')->cascadeOnDelete();
             $table->foreignId('check_id')->nullable()->constrained('checks')->cascadeOnDelete();
-            // incident_id is deferred to Phase 6; snapshots are still captured and linked by check/website.
-            $table->unsignedBigInteger('incident_id')->nullable();
+            $table->unsignedBigInteger('incident_id')->nullable(); // FK added in Phase 6 (ON DELETE SET NULL, DATABASE.md §7)
             $table->string('html_path', 1024)->nullable();
             $table->json('headers')->nullable();
             $table->string('final_url', 2048)->nullable();

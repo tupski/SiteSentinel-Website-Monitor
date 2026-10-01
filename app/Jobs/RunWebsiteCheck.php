@@ -10,6 +10,7 @@ use App\Models\Website;
 use App\Models\WebsiteBaseline;
 use App\Services\Detection\RuleEngine;
 use App\Services\Detection\SnapshotWriter;
+use App\Services\Incidents\IncidentEngine;
 use App\Services\Monitor\Probe;
 use App\Services\Monitor\ProbeResult;
 use Illuminate\Bus\Queueable;
@@ -21,6 +22,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Runs one monitoring check for a website (Phase 4 probe + Phase 5 detection).
@@ -43,8 +46,12 @@ final class RunWebsiteCheck implements ShouldQueue
 
     public function __construct(public Website $website) {}
 
-    public function handle(Probe $probe, RuleEngine $engine, SnapshotWriter $snapshotWriter): void
-    {
+    public function handle(
+        Probe $probe,
+        RuleEngine $engine,
+        SnapshotWriter $snapshotWriter,
+        ?IncidentEngine $incidentEngine = null,
+    ): void {
         $lock = Cache::lock('website-check:'.$this->website->id, 120);
 
         if (! $lock->get()) {
@@ -53,14 +60,18 @@ final class RunWebsiteCheck implements ShouldQueue
         }
 
         try {
-            $this->run($probe, $engine, $snapshotWriter);
+            $this->run($probe, $engine, $snapshotWriter, $incidentEngine ?? app(IncidentEngine::class));
         } finally {
             $lock->release();
         }
     }
 
-    private function run(Probe $probe, RuleEngine $engine, SnapshotWriter $snapshotWriter): void
-    {
+    private function run(
+        Probe $probe,
+        RuleEngine $engine,
+        SnapshotWriter $snapshotWriter,
+        IncidentEngine $incidentEngine,
+    ): void {
         $key = $this->checkKey();
 
         // Idempotency guard: an identical logical check was already persisted.
@@ -104,8 +115,9 @@ final class RunWebsiteCheck implements ShouldQueue
 
         // Snapshot capture is a side effect and must never roll back the check
         // (AGENTS.md 9). It runs outside the transaction.
+        $snapshot = null;
         if (in_array($check->security_state, ['SUSPECT', 'INCIDENT'], true)) {
-            $snapshotWriter->capture(
+            $snapshot = $snapshotWriter->capture(
                 $check,
                 (string) ($result->body ?? ''),
                 is_array($result->headers) ? $result->headers : [],
@@ -114,6 +126,33 @@ final class RunWebsiteCheck implements ShouldQueue
                     'external_links' => $extraction?->external_domains,
                 ],
             );
+        }
+
+        // Incident reconciliation (PLAN.md Phase 6) is also a side effect of the
+        // check: a failure here must never invalidate the persisted check row.
+        // Counters (consecutive_failures/successes) are already committed, so
+        // threshold evaluation is consistent with what the check recorded.
+        try {
+            $incident = $incidentEngine->processCheck($this->website->refresh(), $check, [
+                'security_state' => $check->security_state,
+                'score' => $check->score,
+                'triggered_rules' => $check->triggered_rules,
+            ]);
+
+            // Evidence linkage (DATABASE.md 3.12): the snapshot captured for this
+            // check belongs to the open incident it escalated.
+            if ($snapshot !== null && $incident !== null) {
+                $snapshot->incident_id = $incident->id;
+                $snapshot->save();
+            }
+        } catch (Throwable $e) {
+            report($e);
+
+            Log::warning('Incident reconciliation failed', [
+                'website_id' => $this->website->id,
+                'check_id' => $check->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

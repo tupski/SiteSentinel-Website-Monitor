@@ -2,6 +2,20 @@
 
 ## [2026-09-30]
 
+### Added (Phase 6 — Incident Management)
+- Incident engine (`App\Services\Incidents\IncidentEngine`) reconciling the incident ledger after every persisted check: availability threshold cross opens an incident at `WARNING`, escalating to `CRITICAL` after `sentinel.incidents.availability_critical_after_failures` (default 6) consecutive failures (FR-53, PRD §11.3); security score crossing the `SUSPECT`/`INCIDENT` bands opens a `WARNING`/`CRITICAL` incident with full rule attribution (FR-54, FR-49); `OK`/`INFO` never opens an incident.
+- Dedupe/merge (FR-60, AC-13): repeated detections of an open condition append `evidence_appended` events and update score/attributions in place; one open incident per `website_id + type`, re-checked inside a transaction so concurrent workers cannot double-create.
+- Incident lifecycle state machine (`App\Services\Incidents\IncidentStateMachine`, PRD §12.1): `DETECTED -> ACKNOWLEDGED -> RESOLVED` only; `RESOLVED` is terminal; illegal transitions throw; replayed transitions are idempotent (NFR-09); every transition appends an immutable `incident_events` row with actor + timestamp (FR-57).
+- Acknowledgement records actor + timestamp and never resolves (FR-58, AC-10); manual resolution stamps `resolution_mode = manual`, automatic resolution on sustained recovery stamps `resolution_mode = auto` with no acting user (FR-59, AC-11); recovery threshold configurable via `sentinel.incidents.recovery_consecutive_checks` (default 2, clock-controlled tests).
+- Recurrence after resolution opens a NEW incident (AC-12).
+- `incidents` + `incident_events` migrations matching `DATABASE.md` §3.10/§3.11 (canonical enums, `dedupe_key` index, FKs, `incident_events` cascade); `snapshots.incident_id` now carries a real FK with `ON DELETE SET NULL` per `DATABASE.md` §7.
+- `RunWebsiteCheck` runs incident reconciliation after check persistence as a failure-isolated side effect (AGENTS.md §9) and links the captured evidence snapshot to the open incident (`snapshots.incident_id`).
+- Admin incident UI (PLAN.md Phase 6): filterable list (state/severity/type, FR-62), detail page with rule attribution (AC-14) or failure classification, immutable timeline, acknowledge/resolve actions, evidence snapshot list; nav entry added.
+- Dashboard delivered: counters total/operational/warning/incident (AC-6-07), per-website availability and security areas kept strictly separate (AGENTS.md §15.2), open-incident list, and an interleaved check + incident timeline (FR-61).
+- Phase 6 feature tests: incident lifecycle (threshold, transient suppression, dedupe, escalation, sustained-recovery auto-resolution, recurrence), state machine semantics (acknowledge≠resolve, terminal RESOLVED, manual vs auto distinction, idempotent replay), HTTP authorization (unauth redirect, non-admin 403 on every method), rule-attribution rendering, filters, dashboard counters.
+
+## [2026-09-30]
+
 ### Fixed (Phase 5 final verification)
 - `RULE-SSL-004` now emits its canonical graduated tiers (DETECTION-RULES 8.2): `<= 7` days tier 7 (CRITICAL-eligible), `<= 14` tier 14 (WARNING band), `<= 30` tier 30 (INFO band), silent beyond 30 days. The tier is carried in the signal evidence; scoring remains weight x confidence and the correlation guard still applies at the CRITICAL-eligible tier.
 - `RULE-SEO-004` now compares script sources against the baseline (canonical 8.8 `host(script.src) not in baseline_domains`): a script host already absorbed into `website_baselines.external_domains` no longer fires; off-baseline hosts fire with `new_script_src` evidence. Baseline evidence reuses the existing canonical column; no schema change.

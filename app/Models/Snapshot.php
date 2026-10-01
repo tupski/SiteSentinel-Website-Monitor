@@ -71,4 +71,9 @@ final class Snapshot extends Model
     {
         return $this->belongsTo(Check::class);
     }
+
+    public function incident(): BelongsTo
+    {
+        return $this->belongsTo(Incident::class);
+    }
 }

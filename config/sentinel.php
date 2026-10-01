@@ -128,6 +128,21 @@ return [
         'suspicious_tlds' => ['.top', '.xyz', '.click', '.loan', '.bid', '.download'],
     ],
 
+    /*
+    |----------------------------------------------------------------------
+    | Incidents — lifecycle thresholds (PRD §12, PLAN.md Phase 6)
+    |----------------------------------------------------------------------
+    */
+    'incidents' => [
+        // Consecutive healthy checks required before an open incident is
+        // auto-resolved (FR-59, AC-11). Configurable per deployment.
+        'recovery_consecutive_checks' => (int) env('SENTINEL_RECOVERY_CONSECUTIVE_CHECKS', 2),
+
+        // Availability incident escalates to CRITICAL when the failure persists
+        // beyond this many consecutive failures (PRD §11.3).
+        'availability_critical_after_failures' => (int) env('SENTINEL_AVAILABILITY_CRITICAL_AFTER_FAILURES', 6),
+    ],
+
     'notifications' => [
         // Global default cooldown window between repeat alerts for website+channel (NOTIFICATIONS §9.2)
         'default_cooldown_minutes' => (int) env('SENTINEL_DEFAULT_COOLDOWN_MINUTES', 15),

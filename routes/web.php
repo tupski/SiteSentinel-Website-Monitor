@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\IncidentController;
 use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\Auth\LoginController;
@@ -36,4 +37,10 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'admin'])->group(fun
     // Phase 3: monitored website CRUD
     Route::resource('websites', WebsiteController::class)->except(['show']);
     Route::post('websites/{website}/toggle', [WebsiteController::class, 'toggle'])->name('websites.toggle');
+
+    // Phase 6: incident lifecycle
+    Route::get('incidents', [IncidentController::class, 'index'])->name('incidents.index');
+    Route::get('incidents/{incident}', [IncidentController::class, 'show'])->name('incidents.show');
+    Route::post('incidents/{incident}/acknowledge', [IncidentController::class, 'acknowledge'])->name('incidents.acknowledge');
+    Route::post('incidents/{incident}/resolve', [IncidentController::class, 'resolve'])->name('incidents.resolve');
 });

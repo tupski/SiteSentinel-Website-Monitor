@@ -15,6 +15,7 @@
                 <nav class="flex items-center gap-4 text-sm">
                     <a href="{{ route('admin.dashboard') }}" class="text-slate-600 hover:text-slate-900">{{ __('Dashboard') }}</a>
                     <a href="{{ route('admin.websites.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Websites') }}</a>
+                    <a href="{{ route('admin.incidents.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Incidents') }}</a>
                     {{-- Navigation for later phases (incidents, settings) lands here. --}}
                 </nav>
             </div>
