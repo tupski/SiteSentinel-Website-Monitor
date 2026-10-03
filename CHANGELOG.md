@@ -1,5 +1,30 @@
 # Changelog
 
+## [2026-10-03] — Phase 9: Security Hardening
+
+### Added (Phase 9 — Security Hardening)
+- `app/Http/Middleware/EnforceSessionTimeouts.php` — enforces the SECURITY.md §2.5 idle (default 30 min) and absolute (default 8 h) admin session timeouts; wired into the `/admin` group via the `session.timeouts` alias. Logs out + invalidates the session on expiry.
+- Retention pruning (`AC-19`): `Check`, `Snapshot`, `NotificationLog`, `Incident`, `NotificationCooldown` now implement `Prunable`/`MassPrunable` with the frozen windows (checks 30d, snapshots 14d, notification_logs 90d, incidents 365d, cooldowns by `expires_at`). `model:prune` was previously scheduled but a no-op because no model was prunable. `Snapshot::pruning()` deletes the on-disk HTML artefact with the row.
+- `TRUSTED_PROXIES` env + `trustProxies()` wiring (opt-in, never `*`): the app runs behind Nginx, so IP-keyed throttling would otherwise collapse all clients into one bucket. Default trusts nothing (fail-safe, unspoofable `X-Forwarded-For`).
+- Security regression suite `tests/Feature/Security/*` — **82 tests** organized by threat model: `SsrfRegressionTest` (blocked destination never reaches the transport, redirect revalidation, connection-destination pinning), `CsrfSessionTest`, `ThrottlingTest`, `SecretsRedactionTest`, `AuthorizationIdorTest`, `RetentionPruningTest`, `SessionTimeoutTest`, `ProductionConfigTest`, `QueueExternalServiceTest`, `LoggingBoundariesTest`, plus a shared `SecurityTestCase`.
+
+### Fixed (Phase 9 — audit-driven)
+- **SSRF (High):** `SsrfGuard` now rejects the whole DNS answer if *any* resolved address is denied (SECURITY.md §5.5), closing the mixed public/private-answer / rebinding gap; it previously selected the first public IP and ignored a private one in the same answer. `SsrfUrlValidator` already behaved correctly, so the two layers had diverged.
+- **SSRF (High):** both validators now reject non-canonical numeric IPv4 hosts (`127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1`) before resolution (SECURITY.md §5.4).
+- **Secrets (High):** `NotificationChannel` now hides `secret_ref` from array/JSON serialization (`$hidden`), preventing the decrypted channel secret from leaking through a naive `toArray()`/`toJson()` in a controller or response.
+- **Logging (High):** `MessageRedactor` now redacts JSON-quoted secret pairs (`"token":"…"`), `Authorization` schemes, and Telegram bot tokens embedded in URLs (`api.telegram.org/bot<digits>:<token>/…`), which previously leaked.
+- **Status page (Medium):** `StatusPageController::json` now fails closed with `404` (not `403`) when password mode has no usable hash, so it no longer advertises the page's existence; this matches the HTML path and SECURITY.md §3.5.
+- **CSRF (High if shipped):** removed the blanket `validateCsrfTokens(except: ['/*'])` exemption from `bootstrap/app.php`. Laravel already skips token validation under `APP_ENV=testing`; the wildcard was redundant in tests and a real production bypass risk.
+
+### Verified (Phase 9 close)
+- Full suite **413 tests, 408 passed, 5 failed** — the 5 failures are the pre-existing SQLite `no such table: sessions` environment failures (identical set to the Phase 8 baseline: `BaseLayoutTest`, `ExampleTest`, 3× `HealthEndpointTest`); **zero new regressions**, +84 net tests.
+- `vendor/bin/pint` clean (25 files touched); `npm run build` succeeds; all migrations `Ran`.
+- `SECURITY.md` §12.1 added: the mandatory Phase 9 disposition matrix (29 entries: FIXED / VERIFIED ACCEPTABLE / DEFERRED / BLOCKER / NOT VERIFIED), SSRF adversarial summary, trusted-proxy requirement, encryption/key-management assumptions, and production-readiness limitations that cannot be verified locally.
+
+### Known limitations (documented, not code claims)
+- **BLOCKER (production):** Redis auth is not enabled in `docker-compose.yml` (§12.1 L19) — must be set before production.
+- **DEFERRED / operational:** egress firewall for residual SSRF TOCTOU (L2), HSTS/CSP/full secure-header set (L17), non-root containers (L21), least-privilege DB grants (L20), dependency scanning (L26), backup/restore drill (L27), decompression-ratio cap (L5), global exception-handler scrub (L11).
+
 ## [2026-10-03]
 
 ### Added (Phase 8 — Public Status Page)

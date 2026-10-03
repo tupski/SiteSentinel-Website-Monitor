@@ -33,8 +33,10 @@ Route::post('/logout', [LoginController::class, 'logout'])->middleware('auth')->
 
 // Admin shell — every route here requires auth + active + admin (EnsureAdmin),
 // enforced for ALL HTTP methods (AC-2-02 / SECURITY.md §3.2).
+// `session.timeouts` enforces the SECURITY.md §2.5 idle (30 min) + absolute
+// (8 h) windows before any admin action runs.
 // NOTE: no registration route exists anywhere (AC-2-03).
-Route::prefix('admin')->name('admin.')->middleware(['auth', 'admin'])->group(function (): void {
+Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 'admin'])->group(function (): void {
     Route::get('/', AdminDashboardController::class)->name('dashboard');
 
     // Phase 3: monitored website CRUD

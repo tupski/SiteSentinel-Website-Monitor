@@ -53,6 +53,12 @@ final class StatusPageController extends Controller
     {
         $settings = StatusPageSetting::singleton();
 
+        // Fail-closed: password mode without a usable hash must not advertise
+        // the page's existence. Mirrors show() and SECURITY.md §3.5 (404).
+        if ($settings->isPasswordProtected() && ! $gate->hasUsablePassword($settings)) {
+            abort(404);
+        }
+
         if (! $gate->canView($request, $settings)) {
             if ($settings->isPrivate()) {
                 abort(404);

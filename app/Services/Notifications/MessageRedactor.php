@@ -38,16 +38,28 @@ final class MessageRedactor
 
         $keys = implode('|', array_map(preg_quote(...), self::DENYLIST));
 
-        // key=value / key: value pairs -> key=[REDACTED]
+        // key=value / key: value pairs -> key=[REDACTED]. Quote-aware so
+        // JSON-style `"password":"secret"` (common in serialized exceptions
+        // and HTTP client dumps) is redacted too.
         $redacted = (string) preg_replace(
-            '/('.$keys.')(\s*[:=]\s*)([^\s;,\"\']+)/i',
-            '$1$2[REDACTED]',
+            '/('.$keys.')(["\']?\s*[:=]\s*["\']?)([^\s;,\"\'\}]+)(["\']?)/i',
+            '$1$2[REDACTED]$4',
             $message
         );
 
-        // Raw Telegram bot token `123456:ABC-DEF...` appearing in URLs/exceptions.
+        // Authorization schemes carry the credential after a space
+        // (`Authorization: Bearer <token>`); redact the whole value.
         $redacted = (string) preg_replace(
-            '/\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/',
+            '/(authorization\s*[:=]\s*)([^\r\n;]+)/i',
+            '$1[REDACTED]',
+            $redacted
+        );
+
+        // Raw Telegram bot token `123456:ABC-DEF...` appearing in URLs or
+        // exceptions, with or without the `bot` URL prefix
+        // (`api.telegram.org/bot123456:ABC.../sendMessage`).
+        $redacted = (string) preg_replace(
+            '/\bbot?\d{6,12}:[A-Za-z0-9_-]{30,}\b/',
             '[REDACTED-TELEGRAM-TOKEN]',
             $redacted
         );

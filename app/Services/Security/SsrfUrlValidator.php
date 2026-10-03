@@ -169,6 +169,13 @@ final class SsrfUrlValidator
             self::reject('url', 'The destination URL is not allowed.');
         }
 
+        // Non-canonical numeric hosts (SECURITY.md §5.4): reject alternate
+        // IPv4 spellings (`127.1`, `2130706433`, `0177.0.0.1`, `0x7f000001`)
+        // before they can be expanded by the resolver.
+        if (self::looksLikeNumericHost($host)) {
+            self::reject('url', 'The destination URL is not allowed.');
+        }
+
         foreach (self::BLOCKED_HOST_SUFFIXES as $suffix) {
             if (str_ends_with($host, $suffix) || str_ends_with($host, $suffix.'.')) {
                 self::reject('url', 'The destination URL is not allowed.');
@@ -191,6 +198,19 @@ final class SsrfUrlValidator
         foreach ($ips as $ip) {
             self::validateIp($ip, str_contains($ip, ':'));
         }
+    }
+
+    /**
+     * True when the host is an alternate (non-canonical) numeric IPv4 spelling.
+     */
+    private static function looksLikeNumericHost(string $host): bool
+    {
+        if (preg_match('/^[0-9.]+$/', $host) === 1
+            && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return true;
+        }
+
+        return preg_match('/^0x[0-9a-f]+$/i', $host) === 1;
     }
 
     private static function validateIp(string $ip, bool $ipv6): void

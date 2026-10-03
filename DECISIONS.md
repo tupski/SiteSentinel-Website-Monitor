@@ -787,6 +787,37 @@ edit that does not touch `updated_at` will not revoke unlocks (documented in STA
 
 ---
 
+## ADR-030: Phase 9 security-hardening implementation choices
+
+**Status** — Accepted (Phase 9)
+
+**Context** — The Phase 9 audit surfaced several places where the implementation diverged from
+[`SECURITY.md`](SECURITY.md) or left a documented control unimplemented. Remediating them required
+concrete choices that this ADR freezes so code and spec cannot drift silently.
+
+**Decision**
+
+| Area | Choice | Rationale |
+| --- | --- | --- |
+| **Mixed DNS answers** | `SsrfGuard` rejects the whole answer if *any* resolved IP is denied, matching `SsrfUrlValidator` | SECURITY.md §5.5 requires rejection on any denied address; the two layers had diverged |
+| **Non-canonical numeric hosts** | Reject `127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1` before resolution | SECURITY.md §5.4; prevents alternate-spelling bypass of literal-IP classification |
+| **Session timeouts** | `EnforceSessionTimeouts` middleware on `/admin`, anchors `auth.login_at` / `auth.last_seen_at` in the session, values from `config/sentinel.php` | Implements SECURITY.md §2.5 idle/absolute windows without new columns; signed Carbon diff computed anchor→now |
+| **Retention** | `Prunable`/`MassPrunable` on `Check`, `Snapshot`, `NotificationLog`, `Incident`, `NotificationCooldown`; prune by `created_at` (cooldowns by `expires_at`) | AC-19; `model:prune` was scheduled but inert. Mass-prunable for high-volume tables (DATABASE.md §4); `Snapshot::pruning()` removes the file artefact |
+| **Trusted proxy** | Opt-in `TRUSTED_PROXIES` env, never `*`; default trusts nothing | SECURITY.md §3.4/§7; behind Nginx, IP-keyed throttling collapses without it, but a wildcard would let a direct client spoof `X-Forwarded-For` |
+| **CSRF in tests** | Remove the blanket `except: ['/*']`; rely on Laravel's built-in `runningUnitTests()` bypass | A wildcard exemption is a production bypass if it ever ships; it was redundant in tests |
+| **Secret serialization** | `NotificationChannel::$hidden = ['secret_ref']` | SECURITY.md §4.2 rule 4; prevents decrypted secret leaking via `toArray()`/`toJson()` |
+| **Status JSON fail-closed** | `json()` aborts `404` (not `403`) when password mode lacks a hash | SECURITY.md §3.5; `403` advertises the page's existence |
+
+**Consequences** — *Positive:* the SSRF layers agree, documented session/retention controls are now
+enforced and tested, and secret/serialization leaks are closed. *Negative:* `MassPrunable` deletes
+in bulk without per-model events (acceptable for high-volume telemetry); the trusted-proxy default
+means operators MUST set `TRUSTED_PROXIES` for per-client throttling to be meaningful (documented in
+SECURITY.md §12.1.3).
+
+**Related** — [`SECURITY.md`](SECURITY.md) §2.5, §3.5, §4.2, §5.4, §5.5, §7, §12.1; `PLAN.md` Phase 9.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions

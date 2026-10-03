@@ -97,6 +97,10 @@ services:
     image: redis:7-alpine
     container_name: sitesentinel-redis
     restart: unless-stopped
+    # PRODUCTION BLOCKER (SECURITY.md §11, §12.1 L19): Redis is not publicly
+    # exposed here (no host port), but auth is NOT enabled. Before production,
+    # enable `--requirepass` (from a secret) and set REDIS_PASSWORD in .env.
+    # Do NOT commit a real password to this file.
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data

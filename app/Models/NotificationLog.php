@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -25,7 +27,7 @@ use Illuminate\Support\Carbon;
  */
 final class NotificationLog extends Model
 {
-    use HasFactory;
+    use HasFactory, MassPrunable;
 
     protected $table = 'notification_logs';
 
@@ -62,5 +64,18 @@ final class NotificationLog extends Model
     public function channel(): BelongsTo
     {
         return $this->belongsTo(NotificationChannel::class, 'channel_id');
+    }
+
+    /**
+     * Retention: prune delivery logs older than `retention.notification_logs_days`
+     * (PRD FR-93, AC-19, DATABASE.md §4).
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        return self::query()->where('created_at', '<=', now()->subDays(
+            max(1, (int) config('sentinel.retention.notification_logs_days', 90))
+        ));
     }
 }

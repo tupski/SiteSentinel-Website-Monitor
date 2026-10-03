@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 
@@ -24,7 +26,7 @@ use Illuminate\Support\Carbon;
  */
 final class NotificationCooldown extends Model
 {
-    use HasFactory;
+    use HasFactory, MassPrunable;
 
     protected $table = 'notification_cooldowns';
 
@@ -48,5 +50,17 @@ final class NotificationCooldown extends Model
             'expires_at' => 'datetime',
             'suppressed_count' => 'integer',
         ];
+    }
+
+    /**
+     * Transient state: prune cooldown windows whose expiry has passed
+     * (DATABASE.md §4 "notification_cooldowns — transient — delete by
+     * expires_at").
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        return self::query()->where('expires_at', '<=', now());
     }
 }

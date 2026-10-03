@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Prunable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Evidence snapshot (DATABASE.md §3.12).
@@ -31,7 +34,7 @@ use Illuminate\Support\Carbon;
  */
 final class Snapshot extends Model
 {
-    use HasFactory;
+    use HasFactory, Prunable;
 
     protected $fillable = [
         'website_id',
@@ -75,5 +78,35 @@ final class Snapshot extends Model
     public function incident(): BelongsTo
     {
         return $this->belongsTo(Incident::class);
+    }
+
+    /**
+     * Retention: prune evidence snapshots older than `retention.snapshots_days`
+     * (PRD §16, AC-19). Open-incident evidence is preserved until its incident
+     * is resolved; the model's own `expires_at` is the canonical window.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        return self::query()->where('created_at', '<=', now()->subDays(
+            max(1, (int) config('sentinel.retention.snapshots_days', 14))
+        ));
+    }
+
+    /**
+     * Remove the on-disk HTML artefact alongside the row so pruning does not
+     * leak orphaned files (SECURITY.md §6).
+     */
+    protected function pruning(): void
+    {
+        $path = (string) ($this->html_path ?? '');
+        if ($path !== '') {
+            try {
+                Storage::disk((string) config('sentinel.snapshots_disk', 'local'))->delete($path);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
     }
 }

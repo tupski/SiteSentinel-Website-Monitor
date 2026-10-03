@@ -87,10 +87,31 @@ final class SsrfGuardTest extends TestCase
         $this->assertSame(['1.2.3.4', '1.2.3.5'], $result['valid_ips']);
     }
 
-    public function test_mixed_resolved_ips_select_only_public(): void
+    /**
+     * SECURITY.md §5.5: "If any resolved address is denied, the request is
+     * rejected." A hostname that resolves to both a public and a private
+     * address (DNS-rebinding / split-horizon answer) must fail closed, not
+     * silently select the public address. The write-time validator and the
+     * runtime guard must agree.
+     */
+    public function test_mixed_public_and_private_answers_are_rejected(): void
     {
         SsrfGuard::setResolver(fn () => ['1.2.3.4', '127.0.0.1']);
-        $result = SsrfGuard::validate('https://mixed.example.test/');
+        $this->expectException(ValidationException::class);
+        SsrfGuard::validate('https://mixed.example.test/');
+    }
+
+    public function test_mixed_answer_with_private_first_is_also_rejected(): void
+    {
+        SsrfGuard::setResolver(fn () => ['10.0.0.1', '1.2.3.4']);
+        $this->expectException(ValidationException::class);
+        SsrfGuard::validate('https://mixed-first.example.test/');
+    }
+
+    public function test_all_public_answers_are_accepted(): void
+    {
+        SsrfGuard::setResolver(fn () => ['1.2.3.4', '1.2.3.5']);
+        $result = SsrfGuard::validate('https://multi.example.test/');
         $this->assertSame('1.2.3.4', $result['selected_ip']);
     }
 }

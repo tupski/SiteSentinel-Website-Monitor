@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 final class Check extends Model
 {
-    use HasFactory;
+    use HasFactory, MassPrunable;
 
     protected $fillable = [
         'website_id',
@@ -60,5 +62,19 @@ final class Check extends Model
     public function extraction(): HasOne
     {
         return $this->hasOne(CheckExtraction::class);
+    }
+
+    /**
+     * Retention: prune check telemetry older than `retention.checks_days`
+     * (PRD FR-91, AC-19, DATABASE.md §4). `check_extractions` cascade on
+     * delete, so no orphan rows remain.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        $days = max(1, (int) config('sentinel.retention.checks_days', 30));
+
+        return self::query()->where('created_at', '<=', now()->subDays($days));
     }
 }

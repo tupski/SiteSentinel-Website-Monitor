@@ -39,6 +39,17 @@ final class NotificationChannel extends Model
     ];
 
     /**
+     * Never serialize the decrypted secret to arrays/JSON (SECURITY.md §4.2
+     * rule 4: the current value is never sent to the browser). Direct
+     * attribute access (`$channel->secret_ref`) is unaffected.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'secret_ref',
+    ];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array

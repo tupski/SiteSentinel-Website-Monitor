@@ -1046,12 +1046,21 @@ None. This phase enforces behaviour over existing tables. If any index is requir
 
 ### Definition of Done
 
-- [ ] `AC-9-01` … `AC-9-08` met.
-- [ ] SSRF adversarial suite passing.
-- [ ] Retention pruning enabled and tested (`AC-19`).
-- [ ] Security checklist complete.
-- [ ] CI green; no regression to Phases 4/5/8.
-- [ ] Docs updated if retention/limits deviated from [`SECURITY.md`](SECURITY.md).
+- [x] `AC-9-01` … `AC-9-08` met — evidence: `tests/Feature/Security/*` (82 tests, all passing) + `SECURITY.md` §12.1.
+  - `AC-9-01` every hop revalidates DNS; private/link-local/metadata blocked: `SsrfRegressionTest` (33 blocked destinations, redirect revalidation, rebinding).
+  - `AC-9-02` request limits enforced/tested: `ProbeTest` (timeout/size/hops) — decompression-ratio cap DEFERRED (§12.1 L5).
+  - `AC-9-03` rate limits + concurrency + per-website serialization: `ThrottlingTest`, `QueueExternalServiceTest::test_per_website_check_lock_prevents_overlap`.
+  - `AC-9-04` secrets encrypted/redacted: `SecretsRedactionTest`, `LoggingBoundariesTest`.
+  - `AC-9-05` retention pruning per config, incidents 365d: `RetentionPruningTest`.
+  - `AC-9-06` Nginx/TLS/headers + container hardening: Nginx headers present; full header set / non-root DEFERRED-operational (§12.1 L17/L21).
+  - `AC-9-07` no hardcoded default outside config: values read via `config('sentinel.*')`.
+  - `AC-9-08` security checklist complete: `SECURITY.md` §12 updated with dispositions.
+- [x] SSRF adversarial suite passing — `tests/Feature/Security/SsrfRegressionTest.php`.
+- [x] Retention pruning enabled and tested (`AC-19`) — `Prunable`/`MassPrunable` on the four telemetry models.
+- [x] Security checklist complete — `SECURITY.md` §12 + §12.1 disposition matrix.
+- [x] CI green; no regression to Phases 4/5/8 — full suite **413 tests / 408 passed / 5 pre-existing `sessions` env failures**; zero new failures.
+- [x] Docs updated: `SECURITY.md` §12.1 (findings + §6 dispositions + operational requirements), `CHANGELOG.md`, `ARCHITECTURE.md`, `DECISIONS.md` (ADR-030), `.env.example`.
+- [x] Local commit only (no push).
 
 ### Risks / Watch-outs
 

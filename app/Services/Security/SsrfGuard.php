@@ -111,18 +111,35 @@ final class SsrfGuard
         }
     }
 
+    /**
+     * Select the destination IP, rejecting the whole answer if ANY resolved
+     * address is disallowed (SECURITY.md §5.5: "If any resolved address is
+     * denied, the request is rejected"). This closes the DNS-rebinding
+     * mixed-answer gap: a hostname that resolves to both a public and a private
+     * address must never be fetched, even though a public IP is present.
+     *
+     * This mirrors the write-time SsrfUrlValidator, which already rejects the
+     * whole answer on the first denied address — the two layers must agree.
+     */
     private static function chooseIp(array $ips): string
     {
+        $selected = null;
+
         foreach ($ips as $ip) {
             try {
                 self::validateIp($ip);
-
-                return $ip;
             } catch (ValidationException $e) {
-                continue;
+                self::reject('Destination resolves to a disallowed address.');
             }
+
+            $selected ??= $ip;
         }
-        self::reject('No safe destination IP found.');
+
+        if ($selected === null) {
+            self::reject('No safe destination IP found.');
+        }
+
+        return $selected;
     }
 
     private static function stripBrackets(string $host): string
@@ -182,6 +199,15 @@ final class SsrfGuard
             self::reject('Internal hostname not allowed.');
         }
 
+        // Non-canonical numeric hosts (SECURITY.md §5.4): `127.1`, `2130706433`,
+        // `0177.0.0.1`, `0x7f000001` are alternate spellings of an IPv4 address.
+        // They are not valid canonical dotted-quad literals, so they would slip
+        // past literal-IP classification and reach the resolver. Reject them
+        // rather than trusting DNS/`getaddrinfo` to expand them safely.
+        if (self::looksLikeNumericHost($host)) {
+            self::reject('Non-canonical numeric host not allowed.');
+        }
+
         foreach (self::BLOCKED_HOST_SUFFIXES as $suffix) {
             if (str_ends_with($host, $suffix) || str_ends_with($host, $suffix.'.')) {
                 self::reject('Internal hostname not allowed.');
@@ -195,6 +221,21 @@ final class SsrfGuard
         if (! preg_match('/^[a-z0-9\\-.]+$/', $host)) {
             self::reject('Invalid hostname characters.');
         }
+    }
+
+    /**
+     * True when the host is an alternate (non-canonical) numeric IPv4 spelling.
+     */
+    private static function looksLikeNumericHost(string $host): bool
+    {
+        // Decimal / octal-dotted (e.g. `2130706433`, `127.1`, `0177.0.0.1`).
+        if (preg_match('/^[0-9.]+$/', $host) === 1
+            && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return true;
+        }
+
+        // Hexadecimal (e.g. `0x7f000001`).
+        return preg_match('/^0x[0-9a-f]+$/i', $host) === 1;
     }
 
     private static function checkBlockedRanges(string $ip, bool $ipv6): void

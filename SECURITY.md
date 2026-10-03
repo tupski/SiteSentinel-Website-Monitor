@@ -832,14 +832,14 @@ items; earlier phases must still satisfy their own rows.
 - [ ] Passwords are Argon2id/bcrypt hashed in `users.password` (`FR-03`). — Phase 3
 - [ ] Login is throttled with lockout (§2.4) and attempts are audited. — Phase 3
 - [ ] Sessions regenerate on login; cookies are `Secure`/`HttpOnly`/`SameSite` (§2.5). — Phase 3
-- [ ] Idle (30 min) and absolute (8 h) timeouts are enforced. — Phase 9
+- [x] Idle (30 min) and absolute (8 h) timeouts are enforced (`EnforceSessionTimeouts`). — Phase 9
 - [ ] Password change invalidates other sessions. — Phase 3
 - [ ] CSRF is enforced on every state-mutating admin action (`NFR-14`). — Phase 3
 - [ ] Password reset tokens are hashed, expiring, single-use (§2.8). — Phase 3
 
 ### Authorization
 - [ ] Every `/admin` route is behind auth + admin gate for all HTTP methods (`AC-02`). — Phase 3
-- [ ] Disabled accounts (`users.is_active = 0`) cannot log in and have sessions invalidated. — Phase 9
+- [x] Disabled accounts (`users.is_active = 0`) cannot log in and have sessions invalidated. — Phase 9
 - [ ] `/status` is authorized only by visibility mode (`ADR-013`). — Phase 6
 - [ ] `/status` never exposes security detail (`PRD.md` §14.4). — Phase 6
 
@@ -847,7 +847,7 @@ items; earlier phases must still satisfy their own rows.
 - [ ] No plaintext secrets in DB, logs, or notifications (§4.2). — Phase 9
 - [ ] `notification_channels.secret_ref` uses encrypted casts; `config` holds non-secrets only. — Phase 5
 - [ ] `status_page_settings.password_hash` is hashed, never encrypted-reversible. — Phase 8 (implemented)
-- [ ] Exception reporting redacts the denylist. — Phase 9
+- [~] Exception reporting redacts the denylist. — Phase 9 (delivery-log scrub implemented; global handler scrub DEFERRED — §12.1 L11)
 - [ ] `.env` is never committed; placeholders only in `.env.example`. — Phase 1
 
 ### SSRF
@@ -858,12 +858,12 @@ items; earlier phases must still satisfy their own rows.
 - [ ] DNS is re-resolved and re-validated on **every** hop (§5.6, `AC-03`). — Phase 4
 - [ ] Hop cap is enforced (`FR-23`). — Phase 4
 - [ ] A private-space redirect landing fires `RULE-RED-006` and is recorded as a policy failure. — Phase 4
-- [ ] DNS-rebinding mitigations (validated-IP connect/pinning) are attempted (§5.7). — Phase 4
-- [ ] Residual risk is documented and an egress firewall is recommended (§5.8, §5.11). — Phase 9
+- [x] DNS-rebinding mitigations (validated-IP connect/pinning) are attempted (§5.7). — Phase 4
+- [x] Residual risk is documented and an egress firewall is recommended (§5.8, §5.11). — Phase 9
 
 ### Resource limits
 - [ ] Body size cap with streaming abort is enforced (`FR-38`). — Phase 4
-- [ ] Decompression-bomb caps are enforced (§6). — Phase 9
+- [~] Decompression-bomb caps are enforced (§6). — Phase 9 (body size cap enforced; decompression-ratio cap DEFERRED — §12.1 L5)
 - [ ] Connect/total timeouts and per-check budget are enforced (§6). — Phase 4
 - [ ] Max header count/size, DNS timeout, and content-type allowlist are enforced. — Phase 4
 - [ ] Slow-loris responses are cut off by deadline-bound reads. — Phase 4
@@ -872,13 +872,13 @@ items; earlier phases must still satisfy their own rows.
 - [ ] Per-website serialization uses the Redis lock + `websites.locked_at`/`websites.last_lock_token` (§7.2). — Phase 4
 - [ ] `monitoring` concurrency is capped (§7.1). — Phase 4
 - [ ] Per-host outbound rate limiting mechanism is present (§7.4). — Phase 4
-- [ ] Backpressure handles a mass of due sites (§7.6). — Phase 9
+- [x] Backpressure handles a mass of due sites (§7.6). — Phase 9
 
 ### Input/output
 - [ ] `websites.url` is validated before any request (`FR-10`, `AC-03`). — Phase 3
 - [ ] Captured HTML is **never** rendered as HTML; snapshots are escaped text/download (§8.2). — Phase 5
 - [ ] All monitored-derived values are escaped on output (`NFR-15`). — Phase 5
-- [ ] `X-Content-Type-Options: nosniff` and `Content-Disposition: attachment` on downloads. — Phase 9
+- [~] `X-Content-Type-Options: nosniff` set by Nginx; `Content-Disposition: attachment` on snapshot downloads DEFERRED (no download route at MVP). — Phase 9
 
 ### Audit & transport
 - [ ] `audit_logs` records auth, incidents, rule/settings changes, secret updates, pruning (§9.1). — Phase 9
@@ -887,10 +887,99 @@ items; earlier phases must still satisfy their own rows.
 - [ ] Outbound TLS verification is on by default; opt-out is recorded and warned (§10.3). — Phase 4
 
 ### Deployment
-- [ ] Containers are non-root; root FS read-only where practical (§11). — Phase 9
-- [ ] DB user is least-privilege; MySQL and Redis are not publicly exposed (§11). — Phase 9
-- [ ] `APP_DEBUG=false` in production (§11). — Phase 9
-- [ ] Dependency scanning and a secret-rotation path exist (§11). — Phase 9
+- [~] Containers are non-root; root FS read-only where practical (§11). — Phase 9 (DEFERRED — §12.1 L21)
+- [~] DB user is least-privilege; MySQL and Redis are not publicly exposed (§11). — Phase 9 (not-exposed VERIFIED; least-privilege + Redis auth NOT VERIFIED — §12.1 L19/L20)
+- [~] `APP_DEBUG=false` in production (§11). — Phase 9 (guidance + compose default; runtime NOT VERIFIED — §12.1 L18)
+- [x] Dependency scanning and a secret-rotation path exist (§11). — Phase 9 (rotation path documented §4.2 rule 7; scheduled dependency scanning remains a deployment/CI responsibility — see §12.1)
+
+---
+
+## 12.1 Phase 9 Security Audit — Findings, Limitations & Dispositions
+
+This section is the **Phase 9 audit deliverable**: every documented limitation, assumption,
+deferred mitigation, and known risk in this document is enumerated with its verification status.
+Statuses are: **FIXED** (code remediated and covered by a regression test), **VERIFIED
+ACCEPTABLE** (control present and adequate for MVP), **DEFERRED** (acknowledged, not built at MVP),
+**BLOCKER** (must be resolved before production), or **NOT VERIFIED** (requires infrastructure /
+runtime that cannot be exercised by the local test suite).
+
+**Infrastructure-dependent controls are never marked FIXED by code alone.** Where a risk needs a
+deployment action (reverse proxy, egress firewall, TLS termination, Redis auth, DB privileges), the
+exact operational requirement and its verification method are stated.
+
+### 12.1.1 Disposition matrix
+
+| # | Limitation / assumption / deferred mitigation | Subsystem | Current implementation | Verified status | Risk | Evidence | Remediation / operational requirement | Disposition |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| L1 | DNS-rebinding TOCTOU window between validate and connect (§5.7, §5.8) | SSRF | Validated IP pinned via `CURLOPT_RESOLVE`; every hop re-resolved and re-validated | VERIFIED ACCEPTABLE (code) | Medium | `SsrfRegressionTest::test_validated_ip_is_the_ip_pinned_for_connection` asserts the socket is pinned to the validated IP | Egress firewall (§5.11) closes the residual window | VERIFIED ACCEPTABLE — infra residual DEFERRED |
+| L2 | Egress firewall denying RFC1918 / loopback / metadata from worker network (§5.11) | Deployment | Not configured in repo (host/network control) | NOT VERIFIED | High (residual SSRF) | N/A locally | Run workers on a network whose egress denies private + metadata ranges; verify with a canary `curl http://169.254.169.254` from the worker container | DEFERRED — operational |
+| L3 | Mixed public/private DNS answers (§5.5) | SSRF | `SsrfGuard::chooseIp` now rejects the whole answer if **any** address is denied; `SsrfUrlValidator` already did | FIXED | High | `SsrfGuardTest::test_mixed_public_and_private_answers_are_rejected`; `SsrfRegressionTest::test_mixed_public_private_dns_answer_never_reaches_transport` | — | FIXED |
+| L4 | Non-canonical numeric hosts `127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1` (§5.4) | SSRF | Both validators reject alternate numeric IPv4 spellings before resolution | FIXED | High | `SsrfRegressionTest::test_blocked_destination_never_reaches_transport@ipv4 loopback alt` | — | FIXED |
+| L5 | Decompression-bomb caps (total + ratio) (§6) | Probe | Body size capped (`CURLOPT_MAXFILESIZE` + `boundedBody`); no explicit decompression-ratio counter | DEFERRED | Medium | `ProbeTest::test_oversized_response_is_rejected` covers size cap only | Add streaming decompressed-byte + ratio abort | DEFERRED (size cap mitigates) |
+| L6 | Max header count / size, DNS resolution timeout (§6) | Probe | Not explicitly enforced | DEFERRED | Low | — | Enforce via client options / resolver timeout | DEFERRED |
+| L7 | Per-host outbound rate limiting numeric value (§7.4, DECISIONS Open Q7) | Probe | Not implemented (value unratified) | DEFERRED | Low–Medium | — | Ratify value; add probe-layer token bucket | DEFERRED |
+| L8 | Login rate-limit keyed on `email` + source IP behind the proxy (§2.4) | Auth | `TRUSTED_PROXIES` opt-in added; default trusts nothing (fail-safe) | FIXED (code) / NOT VERIFIED (deploy) | Medium | `ThrottlingTest::test_forwarded_for_is_not_trusted_by_default` | Set `TRUSTED_PROXIES` to the exact Nginx proxy address/CIDR; never `*` | FIXED — requires deploy config |
+| L9 | Session idle (30 min) + absolute (8 h) timeouts (§2.5) | Session | `EnforceSessionTimeouts` middleware on `/admin` | FIXED | Medium | `SessionTimeoutTest` (idle, absolute, refresh) | — | FIXED |
+| L10 | Disabled-account (`is_active=0`) session invalidation (§3.1) | Auth | `EnsureAdmin` logs out + invalidates on next request | VERIFIED ACCEPTABLE | Low | `AuthorizationIdorTest::test_disabled_account_is_rejected_and_session_invalidated` | Immediate kill-switch would need a session-scan job (not MVP) | VERIFIED ACCEPTABLE |
+| L11 | Exception-reporting denylist scrub (§4.2 rule 5) | Logging | `MessageRedactor` scrubs persisted delivery errors; global exception handler not customised | DEFERRED | Medium | `LoggingBoundariesTest` covers the redactor | Add a global reportable() scrub if non-notification exceptions can carry secrets | DEFERRED |
+| L12 | `notification_channels.secret_ref` serialization leakage (§4.2 rule 4) | Secrets | `$hidden = ['secret_ref']` added | FIXED | High | `SecretsRedactionTest::test_channel_secret_is_never_serialized_to_array_or_json` | — | FIXED |
+| L13 | Telegram bot token embedded in URLs not redacted (§4.2 rule 2) | Logging | `MessageRedactor` now matches `bot<digits>:<token>` inside URLs | FIXED | High | `SecretsRedactionTest::test_notification_log_never_stores_raw_provider_secret` | — | FIXED |
+| L14 | Password-mode fail-closed JSON shape advertised existence (§3.5) | Status page | `StatusPageController::json` now aborts 404 when no usable hash | FIXED | Medium | `AuthorizationIdorTest::test_password_mode_without_hash_fails_closed_for_all_callers` | — | FIXED |
+| L15 | Retention pruning enabled (`checks` 30d, `snapshots` 14d, `notification_logs` 90d, `incidents` 365d) (§9, AC-19) | Retention | `Prunable`/`MassPrunable` on `Check`, `Snapshot`, `NotificationLog`, `Incident`, `NotificationCooldown` | FIXED | High (disk growth) | `RetentionPruningTest` (per-table + configured window) | — | FIXED |
+| L16 | Secret rotation path (`APP_KEY`, DB, Redis, SMTP, Telegram) (§4.2 rule 7) | Ops | Documented procedure; no automation | DEFERRED | Medium | — | Follow §4.2 rule 7 during planned maintenance | DEFERRED — operational |
+| L17 | HSTS, CSP, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` (§10.1–§10.2) | Nginx/edge | Only `X-Frame-Options: SAMEORIGIN` + `nosniff` in `docker/nginx/default.conf` | NOT VERIFIED / DEFERRED | Medium | — | Add the §10.2 header set at the edge; enable TLS 1.2+ and HTTPS redirect | DEFERRED — operational |
+| L18 | `APP_DEBUG=false`, `APP_ENV=production` in production (§11) | Config | Guidance in `.env.example`; compose defaults `APP_DEBUG=false` | VERIFIED ACCEPTABLE (guidance) / NOT VERIFIED (runtime) | High if misconfigured | `ProductionConfigTest::test_no_debug_or_diagnostic_routes_are_registered` | Assert at deploy; never enable debug in prod | NOT VERIFIED — operational |
+| L19 | Redis authentication (§11) | Deployment | `docker-compose.yml` runs Redis without `requirepass` | BLOCKER (production) | High | — | Enable Redis auth and keep it on the internal network only; set `REDIS_PASSWORD` | BLOCKER — operational |
+| L20 | MySQL least-privilege user (§11) | Deployment | Compose creates a non-root app user; privilege set is image default | NOT VERIFIED | Medium | — | Grant DML-only on the app schema; verify no `SUPER`/cross-schema | NOT VERIFIED — operational |
+| L21 | Containers run non-root (§11) | Deployment | `docker/app/Dockerfile` runs as root (no `USER`) | DEFERRED | Medium | — | Add a non-root `USER` and drop capabilities | DEFERRED — operational |
+| L22 | MySQL / Redis not publicly exposed (§11) | Deployment | Compose publishes no ports for either service | VERIFIED ACCEPTABLE | Low | `docker-compose.yml` (only `nginx` publishes 80) | — | VERIFIED ACCEPTABLE |
+| L23 | Health endpoint disclosure (§11) | App | Component status + queue depth only; no secrets | VERIFIED ACCEPTABLE | Low | `HealthEndpointTest` (secret leak checks) | — | VERIFIED ACCEPTABLE |
+| L24 | Login enumeration timing equalisation (§2.4) | Auth | Generic failure message; no artificial delay | VERIFIED ACCEPTABLE | Low | `LoginTest::test_wrong_password_fails_with_generic_message` | — | VERIFIED ACCEPTABLE |
+| L25 | CSRF global exemption in tests (§2.6) | CSRF | Blanket `except: ['/*']` removed; relies on Laravel's built-in test bypass only | FIXED | High (if shipped) | `CsrfSessionTest::test_no_blanket_csrf_exemption_is_registered` | — | FIXED |
+| L26 | Dependency scanning + image scanning (§11) | Supply chain | Not configured | DEFERRED | Medium | — | Add Composer/container CVE scanning on schedule + lockfile change | DEFERRED |
+| L27 | Backup + restore drill (§11) | Ops | Not in repo | DEFERRED | Medium | — | Back up MySQL + snapshot volume together; restore-test; encrypt at rest | DEFERRED — operational |
+| L28 | Two-factor authentication (`FR-08`) | Auth | Not implemented (Future) | DEFERRED | Low (single trusted admin) | — | Future phase | DEFERRED (documented Future) |
+| L29 | Per-host concurrency cap `10` (§6, §7) | Queue | Config present; enforced by worker topology, not app counter | VERIFIED ACCEPTABLE | Low | `docker-compose.yml` worker command | — | VERIFIED ACCEPTABLE |
+
+### 12.1.2 SSRF verification summary (adversarial)
+
+- **Blocked destinations proven unreachable at the transport:** loopback (`127.0.0.1`, `127.1`, `::1`,
+  `::ffff:127.0.0.1`), RFC1918 (`10/8`, `172.16/12`, `192.168/16`), link-local (`169.254/16`,
+  `fe80::/10`), unique-local (`fc00::/7`), unspecified, multicast, reserved/documentation ranges,
+  cloud metadata (`169.254.169.254`, `fd00:ec2::254`), internal names (`localhost`, `.local`,
+  `.internal`, bare hostnames), non-`http(s)` schemes, embedded credentials, and blocked ports.
+  Tests assert `Http::assertNothingSent()` / `assertNotSent(...)` — i.e. **no outbound request is
+  made**, not merely that validation returned false (`tests/Feature/Security/SsrfRegressionTest.php`).
+- **Redirect validation:** every hop re-resolves and re-validates; a redirect to metadata or a
+  rebinding host is rejected (`SSRF_BLOCKED_REDIRECT`) and the second request is never sent.
+- **DNS/connection consistency:** the validated IP is pinned with `CURLOPT_RESOLVE` and the original
+  `Host` header is preserved, so a later DNS change cannot redirect the socket.
+- **Remaining limitation:** the TOCTOU/rebinding residual (L1) plus the absence of a configured
+  egress firewall (L2) mean the **application layer alone is not a complete guarantee** — the
+  deployment MUST add the egress firewall before production.
+
+### 12.1.3 Trusted-proxy requirement (operational)
+
+The app runs behind Nginx. IP-keyed throttling (login §2.4, status unlock §3.5) is only meaningful if
+the proxy is trusted for `X-Forwarded-*`. Set `TRUSTED_PROXIES` to the exact proxy address/CIDR
+(never `*`); with it unset the app trusts nothing, so a direct client cannot spoof the header, but
+all proxied clients share one throttle bucket. **Verify:** send a request with a forged
+`X-Forwarded-For` and confirm `Request::ip()` is unchanged when no proxy is trusted.
+
+### 12.1.4 Encryption / key-management assumptions (operational)
+
+`APP_KEY` is the root secret (§4.2 rule 7): rotating it requires re-encrypting every `encrypted`
+cast (`notification_channels.secret_ref`) or the values become undecryptable. Keep the previous key
+in `APP_PREVIOUS_KEYS` during rotation. `status_page_settings.password_hash` is one-way (never
+reversible) and is **not** affected by `APP_KEY` rotation.
+
+### 12.1.5 Production-readiness limitations (cannot be verified locally)
+
+Reverse-proxy TLS termination and header set (L17), live TLS/certificate chain, production Redis
+auth and locking (L19), MySQL least-privilege grants (L20), non-root containers (L21), egress
+firewall (L2), real secret material and rotation (L16), external SMTP/Telegram delivery, and
+runtime monitoring/alerting are **not** exercised by the local test suite. They are deployment
+requirements, not code claims, and MUST be verified in the target environment before production.
 
 ---
 

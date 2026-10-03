@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -36,7 +38,7 @@ use Illuminate\Support\Carbon;
  */
 final class Incident extends Model
 {
-    use HasFactory;
+    use HasFactory, MassPrunable;
 
     protected $table = 'incidents';
 
@@ -113,5 +115,20 @@ final class Incident extends Model
     public function isResolved(): bool
     {
         return $this->status === 'RESOLVED';
+    }
+
+    /**
+     * Retention: prune incident history older than `retention.incidents_days`
+     * (default 365d; PRD FR-92, AC-19, DATABASE.md §4). `incident_events`
+     * cascade; snapshot/notification-log FKs are nullOnDelete, so no reference
+     * is corrupted (FR-95).
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        return self::query()->where('created_at', '<=', now()->subDays(
+            max(1, (int) config('sentinel.retention.incidents_days', 365))
+        ));
     }
 }
