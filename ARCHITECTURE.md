@@ -161,7 +161,7 @@ suggestions; the responsibility boundary is the binding part.
 | Detector / rule engine | Evaluate each enabled `detection_rules` row against check + baseline | `checks` row, `check_extractions` row, `website_baselines` row, `website_rule_settings` | per-rule signals with category/weight | MySQL, rule registry | `app/Services/Detection/RuleEngine.php` |
 | Scoring correlator | Aggregate signals, apply thresholds + correlation guard | per-rule signals | score, security state, incident candidate | config thresholds, rule categories | `app/Services/Detection/ScoringCorrelator.php` |
 | Incident engine | Dedupe/merge against open incident; create/transition; emit timeline events | incident candidate, open `incidents` row | `incidents`, `incident_events`, snapshot trigger | MySQL, incident state machine | `app/Services/Incidents/IncidentEngine.php` |
-| Notification dispatcher + providers | Gate (dedupe/cooldown), select channels, deliver, log | incident, channel set, cooldown state | provider call, `notification_logs` row | queue, Mail, HTTP client | `app/Services/Notifications/Dispatcher.php`, `app/Services/Notifications/Channels/*` |
+| Notification dispatcher + providers | Gate (dedupe/cooldown), select channels, deliver, log | incident, channel set, cooldown state | provider call, `notification_logs` row | queue, Mail, HTTP client | `app/Services/Notifications/NotificationDispatcher.php`, `app/Services/Notifications/Channels/*`, contract `app/Contracts/NotificationProvider.php` |
 | Retention pruner | Delete rows past their retention window | retention config, current time | deleted rows, run metrics | MySQL, Redis | `app/Services/Maintenance/RetentionPruner.php` |
 | Status page | Render public/password-safe aggregate status | `status_page_settings`, aggregated `checks`/`incidents` | HTML, redacted public projection | MySQL, visibility gate | `app/Http/Controllers/StatusPageController.php`, `app/Services/StatusPage` |
 | Admin dashboard | CRUD websites/channels/rules/settings; acknowledge/resolve incidents | authenticated admin session | HTML/Turbo responses | MySQL, auth gate, policy layer | `app/Http/Controllers/Admin/*`, `app/Policies` |
@@ -333,10 +333,15 @@ flowchart TD
 - **Dedupe / cooldown gate** — suppresses repeat notifications for the same incident within the
   cooldown window, keyed by incident + channel + event kind.
 - **Channel selection** — global channels plus optional per-website scoping via
-  `website_notification_channel`.
+  `website_notification_channel`. Absence of pivot rows means all enabled globals.
 - **Providers** — MVP supports Email and Telegram; WhatsApp and Webhook are Future and must not
   be built now.
 - **Delivery log** — every attempt writes a `notification_logs` row (sent, failed, or suppressed).
+- **Implemented paths (Phase 7, PLAN wins over old names)** — contract
+  `app/Contracts/NotificationProvider.php`, dispatcher
+  `app/Services/Notifications/NotificationDispatcher.php`, providers
+  `app/Services/Notifications/Channels/*`, intents/jobs `app/Services/Notifications/NotificationIntents.php`
+  plus `app/Jobs/DispatchIncidentNotifications.php` and `app/Jobs/SendNotification.php`.
 
 ---
 

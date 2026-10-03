@@ -33,6 +33,8 @@ abstract class WebsiteRequest extends FormRequest
             'monitor_redirects' => ['sometimes', 'boolean'],
             'monitor_content' => ['sometimes', 'boolean'],
             'monitor_security' => ['sometimes', 'boolean'],
+            'channel_ids' => ['nullable', 'array', 'max:100'],
+            'channel_ids.*' => ['integer', 'exists:notification_channels,id'],
         ];
     }
 

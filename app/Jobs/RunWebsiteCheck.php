@@ -13,6 +13,7 @@ use App\Services\Detection\SnapshotWriter;
 use App\Services\Incidents\IncidentEngine;
 use App\Services\Monitor\Probe;
 use App\Services\Monitor\ProbeResult;
+use App\Services\Notifications\NotificationIntents;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -132,6 +133,9 @@ final class RunWebsiteCheck implements ShouldQueue
         // check: a failure here must never invalidate the persisted check row.
         // Counters (consecutive_failures/successes) are already committed, so
         // threshold evaluation is consistent with what the check recorded.
+        // Notification intents enqueue after-commit only, never inside a transaction.
+        $before = NotificationIntents::snapshotOpen($this->website->id);
+
         try {
             $incident = $incidentEngine->processCheck($this->website->refresh(), $check, [
                 'security_state' => $check->security_state,
@@ -153,6 +157,14 @@ final class RunWebsiteCheck implements ShouldQueue
                 'check_id' => $check->id,
                 'error' => $e->getMessage(),
             ]);
+
+            return;
+        }
+
+        try {
+            NotificationIntents::enqueueFromDiff($this->website->id, $before);
+        } catch (Throwable $e) {
+            report($e);
         }
     }
 

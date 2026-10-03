@@ -100,6 +100,11 @@ final class Incident extends Model
         return $this->hasMany(Snapshot::class);
     }
 
+    public function notificationLogs(): HasMany
+    {
+        return $this->hasMany(NotificationLog::class);
+    }
+
     public function isOpen(): bool
     {
         return in_array($this->status, ['DETECTED', 'ACKNOWLEDGED'], true);

@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreWebsiteRequest;
 use App\Http\Requests\UpdateWebsiteRequest;
+use App\Models\NotificationChannel;
 use App\Models\Website;
 use App\Services\Audit\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -34,7 +35,11 @@ final class WebsiteController extends Controller
 
     public function create(): View
     {
-        return view('admin.websites.form', ['website' => null]);
+        return view('admin.websites.form', [
+            'website' => null,
+            'channels' => NotificationChannel::query()->orderBy('name')->get(['id', 'type', 'name', 'enabled']),
+            'selectedChannels' => [],
+        ]);
     }
 
     public function store(StoreWebsiteRequest $request): RedirectResponse
@@ -43,6 +48,7 @@ final class WebsiteController extends Controller
         $data = $this->prepareData($validated);
 
         $website = Website::query()->create($data);
+        $this->syncChannels($website, $validated['channel_ids'] ?? null);
 
         $this->audit->log('website.created', $request->user(), $website);
 
@@ -53,7 +59,13 @@ final class WebsiteController extends Controller
 
     public function edit(Website $website): View
     {
-        return view('admin.websites.form', compact('website'));
+        $website->load('notificationChannels:id');
+
+        return view('admin.websites.form', [
+            'website' => $website,
+            'channels' => NotificationChannel::query()->orderBy('name')->get(['id', 'type', 'name', 'enabled']),
+            'selectedChannels' => $website->notificationChannels->pluck('id')->all(),
+        ]);
     }
 
     public function update(UpdateWebsiteRequest $request, Website $website): RedirectResponse
@@ -62,6 +74,7 @@ final class WebsiteController extends Controller
         $data = $this->prepareData($validated, $website);
 
         $website->update($data);
+        $this->syncChannels($website, $validated['channel_ids'] ?? null);
 
         $this->audit->log('website.updated', $request->user(), $website);
 
@@ -131,5 +144,24 @@ final class WebsiteController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * Absence rule: null/empty selection detaches all rows (all enabled channels).
+     *
+     * @param  list<int>|null  $channelIds
+     */
+    private function syncChannels(Website $website, ?array $channelIds): void
+    {
+        $ids = array_values(array_unique(array_map('intval', $channelIds ?? [])));
+
+        if ($ids === []) {
+            $website->notificationChannels()->detach();
+
+            return;
+        }
+
+        $valid = NotificationChannel::query()->whereIn('id', $ids)->pluck('id')->all();
+        $website->notificationChannels()->sync($valid);
     }
 }

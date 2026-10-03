@@ -903,4 +903,20 @@ incidents from being recorded, or other channels from delivering (`FR-72`, `NFR-
 
 ---
 
+## Appendix A — Notification Ops Runbook (Phase 7 as-built)
+
+SMTP/TLS setup: create Email channel in `/admin/notifications` with `host`, `port` (587), `username`, `encryption=tls`, `from_address`/`from_name`, `recipients`, `min_severity`; paste SMTP password into `secret_ref` (encrypted at rest, never prefilled, never logged). Production `validateConfig` rejects non-`tls`/`ssl`. Verify via test-send (`throttle:10,1`) and check `notification_logs` row.
+
+Telegram setup: create bot via BotFather, keep token in secret store; create Telegram channel with `chat_id` (user/group/topic) plus optional `message_thread_id`; paste token into `secret_ref`. Send test message; confirm HTML escaping path. Token never appears in logs (redacted).
+
+Workers: run `php artisan queue:work redis --queue=monitoring,notifications,maintenance,default --sleep=3 --tries=3` (same order as `docker-compose.yml` worker). `DispatchIncidentNotifications` + `SendNotification` both pin `notifications` queue with `tries=3`, `timeout=30`, backoff 60/300/900s.
+
+`after_commit=false` caution: `config/queue.php` leaves `after_commit=false` on all connections, so dispatch inside a transaction would run before commit. `NotificationIntents::enqueue()` wraps every dispatch in `DB::afterCommit()`; `RunWebsiteCheck` diffs `snapshotOpen` before incident reconcile and enqueues after. Never dispatch notification jobs inside a transaction body.
+
+Diagnosis: filter `/admin/notification-logs` by `status`/`channel_id`/`incident_id`; each incident show page carries delivery history. `queued` = waiting, `sent` (+`sent_at`, `provider_message_id`) = delivered, `failed` (+ redacted `error`) = dead-letter after budget, `suppressed` = gate hit (severity/cooldown/dedupe reason in `error`). `suppressed_count` on `notification_cooldowns` counts repeats inside window.
+
+Circuit re-enable: `CircuitBreaker` disables channel (`enabled=0`) after 5 permanent streak or 10 failed/hour, writing `audit_logs` `notification.channel_disabled`. Re-enable by editing channel (verify config/secret, rotate secret if revoked), setting enabled on, then test-send. Monitoring never stops (NFR-10).
+
+429 handling: Telegram 429 returns `retry_after`; `SendNotification` honors it as delay, else backoff schedule. Per-chat Redis lock (`telegram:chat:{id}`, 30s) serializes bursts. Repeated 429s consume budget and may trip circuit — widen cooldown or split chats.
+
 *End of `NOTIFICATIONS.md` — specification only; authoritative for notification delivery mechanics.*

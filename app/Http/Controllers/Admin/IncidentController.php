@@ -8,9 +8,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Incident;
 use App\Services\Audit\AuditLogger;
 use App\Services\Incidents\IncidentStateMachine;
+use App\Services\Notifications\NotificationDispatcher;
+use App\Services\Notifications\NotificationIntents;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use Throwable;
 
 /**
  * Incident lifecycle UI (PLAN.md Phase 6).
@@ -55,9 +58,11 @@ final class IncidentController extends Controller
 
     public function show(Incident $incident): View
     {
-        $incident->load(['website', 'acknowledgedBy', 'resolvedBy', 'events.actor', 'snapshots']);
+        $incident->load(['website', 'acknowledgedBy', 'resolvedBy', 'events.actor', 'snapshots', 'notificationLogs.channel']);
 
-        return view('admin.incidents.show', ['incident' => $incident]);
+        $deliveryLogs = $incident->notificationLogs->sortByDesc('id');
+
+        return view('admin.incidents.show', ['incident' => $incident, 'deliveryLogs' => $deliveryLogs]);
     }
 
     public function acknowledge(Request $request, Incident $incident): RedirectResponse
@@ -68,6 +73,12 @@ final class IncidentController extends Controller
             'from_status' => IncidentStateMachine::DETECTED,
             'to_status' => IncidentStateMachine::ACKNOWLEDGED,
         ]);
+
+        try {
+            NotificationIntents::enqueue($acknowledged->id, NotificationDispatcher::EVENT_ACKNOWLEDGED, $request->user()?->getKey());
+        } catch (Throwable $e) {
+            report($e);
+        }
 
         return back()->with('status', __('Incident acknowledged.'));
     }
@@ -84,6 +95,12 @@ final class IncidentController extends Controller
             'resolution_mode' => 'manual',
             'resolution_notes' => $data['resolution_notes'] ?? null,
         ]);
+
+        try {
+            NotificationIntents::enqueue($resolved->id, NotificationDispatcher::EVENT_RESOLVED, $request->user()?->getKey());
+        } catch (Throwable $e) {
+            report($e);
+        }
 
         return back()->with('status', __('Incident resolved.'));
     }

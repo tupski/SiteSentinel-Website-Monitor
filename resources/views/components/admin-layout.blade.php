@@ -16,7 +16,8 @@
                     <a href="{{ route('admin.dashboard') }}" class="text-slate-600 hover:text-slate-900">{{ __('Dashboard') }}</a>
                     <a href="{{ route('admin.websites.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Websites') }}</a>
                     <a href="{{ route('admin.incidents.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Incidents') }}</a>
-                    {{-- Navigation for later phases (incidents, settings) lands here. --}}
+                    <a href="{{ route('admin.notifications.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Channels') }}</a>
+                    <a href="{{ route('admin.notification-logs.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Delivery log') }}</a>
                 </nav>
             </div>
             <form method="POST" action="{{ route('logout') }}">

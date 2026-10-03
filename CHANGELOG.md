@@ -132,6 +132,25 @@ Nothing in this release should be interpreted as implemented functionality. All 
 
 ## [Unreleased]
 
+### Added — Phase 7 (Notification delivery)
+
+- Migrations `0001_07_01..04`: `notification_channels` (type email/telegram, `config` JSON, `secret_ref` encrypted, soft deletes), `website_notification_channel` pivot (`uq_website_notification_channel`), `notification_logs` (queued/sent/failed/suppressed, `dedupe_key`, no `updated_at`), `notification_cooldowns` (`cooldown_key` unique, `window_started_at`/`expires_at`/`suppressed_count`) — all match `DATABASE.md` §§3.13–3.16, additive only.
+- Models `NotificationChannel` (encrypted `secret_ref` cast), `NotificationLog` (`UPDATED_AT=null`), `NotificationCooldown`; relations `Website::notificationChannels()` / `Incident::notificationLogs()`; absence rule (no pivot rows = all enabled globals) enforced in `NotificationDispatcher::resolveChannels()`.
+- Provider contract `app/Contracts/NotificationProvider.php` (`NotificationProvider` + `NotificationPayload` + `DeliveryResult`); dispatcher `app/Services/Notifications/NotificationDispatcher.php` (severity → cooldown → dedupe gates, per-channel isolation, unknown-type fail-closed, bypass for opened/escalated/resolved); registry `NotificationProviderRegistry`; redactor `MessageRedactor`; circuit breaker `CircuitBreaker`.
+- Jobs `DispatchIncidentNotifications` + `SendNotification` on `notifications` queue (`tries=3`, backoff 60/300/900s, 429 `retry_after` honored, permanent fail-then-throw to `failed_jobs`); intents `NotificationIntents` (after-commit enqueue only, `snapshotOpen`/`enqueueFromDiff` for opened/escalated/auto-resolved); hooks in `RunWebsiteCheck` (diff after incident reconcile, failure-isolated) and `IncidentController` acknowledge/resolve.
+- Providers `Channels/EmailProvider.php` (SMTP via Laravel mailer, HTML+text Blade `emails/incident-*`, 4xx retryable vs 5xx permanent) and `Channels/TelegramProvider.php` (Bot API, HTML escape + plain fallback, 4096 cap preserving `admin_url`, per-chat Redis lock, 429/5xx/timeout retryable vs 401/403/400 permanent, token never logged).
+- Admin UI routes `admin/notifications*` + `admin/notification-logs` (CRUD, test-send throttled `10,1`, delivery-log filters, per-website channel checkboxes with absence-rule copy, incident delivery-history section); Form Requests for channel + `channel_ids` validation; `secret_ref` never prefilled.
+- Baseline comparison: no `notification_state` column (state derived from `notification_logs` queries); no `latency_ms` column (`DeliveryResult::$latency_ms` runtime-only); severity gate lives in `notification_channels.config.min_severity` (WARNING default); templates live in `resources/views/emails/` (not `resources/views/mail/`); `config/sentinel.php` adds only `notifications.default_cooldown_minutes` (retry keys fixed in code).
+
+### Added — Phase 7 (Notification tests, Stage D step 4)
+
+- `tests/Feature/Notifications/*` — 8 behavior-level suites, 49 tests: provider contract (registry resolution, ok/retryable/permanent routing, unknown-type fail-closed, bounded retries), incident-event intents (opened/escalated/manual+auto resolved/acknowledged, cooldown dedupe, after-commit dispatch with rollback suppression, idempotent replay), Email provider (recipient resolution, subject format, HTML+text bodies, 4xx vs 5xx classification, secret redaction), Telegram provider (request shape, HTML escaping, 4096 truncation preserving `admin_url`, 429 `retry_after`, timeout retryable, 401/403/400 permanent, no token in logs), suppression/cooldown (first allowed, 15 min suppression + `suppressed_count`, escalation/recovery bypass, new-incident key, exact clock boundary), idempotency/concurrency (double-job single send, per-channel isolation, identity key), queue failure isolation (monitoring never fails, bounded tries, `failed_jobs` visibility, partial success, no infinite loop), auth/redaction (guest/non-admin blocked on all routes/methods, secrets scrubbed, test-send throttled). All suites assert no-secrets + no-evidence (no keywords/domains/redirects/rule-ids/snapshots/bodies) in payloads and logs.
+
+### Fixed — Phase 7 (test-driven, Stage D step 4)
+
+- `App\Jobs\SendNotification` permanent-failure branch now rethrows after `$this->fail()`: `fail()` alone returns normally, so the worker deleted the job as succeeded and nothing ever reached `failed_jobs` (NOTIFICATIONS.md §12.3). The `failed_jobs_visible` test proves the dead-letter now lands in `failed_jobs`.
+- `resources/views/errors/429.blade.php` no longer references an undefined `$message` variable (throttled responses previously blew up into a 500 `ViewException`); the page now renders static copy. Surfaced by the `test_send_throttled` test.
+
 ### Added
 
 - Phase 0 — Repository & Architecture Bootstrap ([`PLAN.md`](PLAN.md)):

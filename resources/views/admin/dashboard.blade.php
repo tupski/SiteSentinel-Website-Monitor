@@ -24,6 +24,35 @@
     </div>
 
     {{-- AC-2-07 invariant: availability and security stay SEPARATE areas (AGENTS.md 15.2). --}}
+    {{-- FR-101: notification failure visibility reuses counter style. --}}
+    <section aria-labelledby="notifications-heading" class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 id="notifications-heading" class="text-lg font-semibold">{{ __('Notifications') }}</h2>
+        <div class="mt-3 grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <div class="text-sm text-slate-500">{{ __('Failed deliveries') }}</div>
+                <div class="mt-1 text-2xl font-bold">{{ $failedNotificationCount ?? 0 }}</div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <div class="text-sm text-slate-500">{{ __('Disabled channels') }}</div>
+                <div class="mt-1 text-2xl font-bold">{{ ($disabledChannels ?? collect())->count() }}</div>
+            </div>
+        </div>
+        @if (($failedNotifications ?? collect())->isNotEmpty())
+            <ul class="mt-3 space-y-1 text-sm">
+                @foreach ($failedNotifications as $log)
+                    <li class="flex items-center justify-between border-b border-slate-100 pb-1">
+                        <span>#{{ $log->id }} — {{ $log->channel?->name ?? __('Unknown channel') }} ({{ $log->status }})</span>
+                        <a href="{{ route('admin.notification-logs.index', ['status' => 'failed']) }}" class="underline hover:text-slate-900">{{ __('View') }}</a>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
+        @if (($disabledChannels ?? collect())->isNotEmpty())
+            <p class="mt-2 text-sm text-slate-600">{{ __('Disabled') }}: {{ ($disabledChannels ?? collect())->map(fn ($c) => $c->name)->join(', ') }}</p>
+        @endif
+        <a href="{{ route('admin.notification-logs.index') }}" class="mt-3 inline-block text-sm text-slate-600 underline hover:text-slate-900">{{ __('Open delivery log') }}</a>
+    </section>
+
     <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section aria-labelledby="availability-heading" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
             <h2 id="availability-heading" class="text-lg font-semibold">{{ __('Availability') }}</h2>

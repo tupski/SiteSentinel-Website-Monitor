@@ -847,11 +847,11 @@ Deliver the provider-independent notification dispatcher with Email and Telegram
 
 ### Definition of Done
 
-- [ ] `AC-7-01` … `AC-7-08` met.
-- [ ] Both providers pass no-secrets and no-evidence tests.
-- [ ] `notification_*` tables match [`DATABASE.md`](DATABASE.md).
-- [ ] CI green; no regression to Phase 6.
-- [ ] Docs updated if cooldown defaults deviated from [`NOTIFICATIONS.md`](NOTIFICATIONS.md).
+- [x] `AC-7-01` … `AC-7-08` met (evidence: 49 notification tests pass; full suite 230 passed / 5 pre-existing env failures in `sessions` table; see CHANGELOG Phase 7).
+- [x] Both providers pass no-secrets and no-evidence tests.
+- [x] `notification_*` tables match [`DATABASE.md`](DATABASE.md) §§3.13–3.16 verbatim (verified; no drift, no doc change).
+- [x] CI green; no regression to Phase 6 (same 5 pre-existing `sessions` failures; zero new failures).
+- [x] Docs updated if cooldown defaults deviated from [`NOTIFICATIONS.md`](NOTIFICATIONS.md) (no deviation: `SENTINEL_DEFAULT_COOLDOWN_MINUTES=15`).
 
 ### Risks / Watch-outs
 

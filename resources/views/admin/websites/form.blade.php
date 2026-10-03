@@ -96,6 +96,23 @@
                 @endforeach
             </div>
 
+            <fieldset class="rounded border border-slate-200 p-4">
+                <legend class="px-2 text-sm font-medium text-slate-700">{{ __('Notification channels') }}</legend>
+                <p class="text-xs text-slate-500">{{ __('Leave all unchecked to use all enabled channels.') }}</p>
+                @php $checkedIds = array_map('strval', (array) old('channel_ids', $selectedChannels ?? [])); @endphp
+                <div class="mt-2 flex flex-wrap gap-4">
+                    @forelse (($channels ?? collect()) as $ch)
+                        <label class="inline-flex items-center gap-2">
+                            <input type="checkbox" name="channel_ids[]" value="{{ $ch->id }}" @checked(in_array((string) $ch->id, $checkedIds, true)) class="rounded border-slate-300">
+                            <span class="text-sm text-slate-700">{{ $ch->name }} <span class="text-slate-400">({{ $ch->type }}{{ $ch->enabled ? '' : ', disabled' }})</span></span>
+                        </label>
+                    @empty
+                        <p class="text-sm text-slate-500">{{ __('No channels configured yet.') }}</p>
+                    @endforelse
+                </div>
+                @error('channel_ids')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+            </fieldset>
+
             <div class="flex items-center gap-3 pt-2">
                 <button type="submit" class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
                     {{ $website ? __('Update') : __('Create') }}

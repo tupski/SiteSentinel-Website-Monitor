@@ -122,6 +122,38 @@
                 </section>
             @endif
 
+            {{-- FR-71: delivery history for incident stays admin-only with escaped output. --}}
+            <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-lg font-semibold">{{ __('Delivery history') }}</h2>
+                    <a href="{{ route('admin.notification-logs.index', ['incident_id' => $incident->id]) }}" class="text-sm text-slate-600 underline hover:text-slate-900">{{ __('View in logs') }}</a>
+                </div>
+                <table class="mt-3 min-w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500">
+                            <th class="py-2">{{ __('Channel') }}</th>
+                            <th class="py-2">{{ __('Status') }}</th>
+                            <th class="py-2">{{ __('Attempt') }}</th>
+                            <th class="py-2">{{ __('Error') }}</th>
+                            <th class="py-2">{{ __('At') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        @forelse (($deliveryLogs ?? $incident->notificationLogs ?? collect()) as $log)
+                            <tr>
+                                <td class="py-2">{{ $log->channel?->name ?? '—' }} <span class="text-slate-400">({{ $log->channel?->type ?? '—' }})</span></td>
+                                <td class="py-2">{{ $log->status }}</td>
+                                <td class="py-2">{{ $log->attempt }}</td>
+                                <td class="py-2 text-slate-600">{{ $log->error ?? '—' }}</td>
+                                <td class="py-2 text-slate-500">{{ ($log->sent_at ?? $log->created_at)?->format('Y-m-d H:i:s') ?? '—' }}</td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="5" class="py-4 text-center text-slate-500">{{ __('No deliveries recorded.') }}</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </section>
+
             {{-- FR-57: immutable audit trail of state transitions. --}}
             <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 class="text-lg font-semibold">{{ __('Timeline') }}</h2>

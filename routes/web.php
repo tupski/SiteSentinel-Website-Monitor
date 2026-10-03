@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\IncidentController;
+use App\Http\Controllers\Admin\NotificationChannelController;
 use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\Auth\LoginController;
@@ -43,4 +44,15 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'admin'])->group(fun
     Route::get('incidents/{incident}', [IncidentController::class, 'show'])->name('incidents.show');
     Route::post('incidents/{incident}/acknowledge', [IncidentController::class, 'acknowledge'])->name('incidents.acknowledge');
     Route::post('incidents/{incident}/resolve', [IncidentController::class, 'resolve'])->name('incidents.resolve');
+
+    // Phase 7: notification channels + delivery logs (admin only, CSRF via web group).
+    Route::get('notifications', [NotificationChannelController::class, 'index'])->name('notifications.index');
+    Route::get('notifications/create', [NotificationChannelController::class, 'create'])->name('notifications.create');
+    Route::post('notifications', [NotificationChannelController::class, 'store'])->name('notifications.store');
+    Route::get('notifications/{channel}/edit', [NotificationChannelController::class, 'edit'])->name('notifications.edit');
+    Route::put('notifications/{channel}', [NotificationChannelController::class, 'update'])->name('notifications.update');
+    Route::delete('notifications/{channel}', [NotificationChannelController::class, 'destroy'])->name('notifications.destroy');
+    Route::post('notifications/{channel}/test-send', [NotificationChannelController::class, 'testSend'])->middleware('throttle:10,1')->name('notifications.test-send');
+
+    Route::get('notification-logs', [NotificationChannelController::class, 'logs'])->name('notification-logs.index');
 });

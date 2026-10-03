@@ -6,6 +6,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Check;
 use App\Models\Incident;
+use App\Models\NotificationChannel;
+use App\Models\NotificationLog;
 use App\Models\Website;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
@@ -37,6 +39,9 @@ final class AdminDashboardController extends Controller
                 ->count(),
         ];
 
+        // FR-101: failure visibility reuses counter style, no charting.
+        $failedLogs = NotificationLog::query()->where('status', 'failed')->orderByDesc('id')->limit(5)->with('channel:id,name,type')->get();
+
         return view('admin.dashboard', [
             'counters' => $counters,
             'websites' => $websites,
@@ -47,6 +52,9 @@ final class AdminDashboardController extends Controller
                 ->limit(10)
                 ->get(),
             'timeline' => $this->timeline(),
+            'failedNotificationCount' => NotificationLog::query()->where('status', 'failed')->count(),
+            'failedNotifications' => $failedLogs,
+            'disabledChannels' => NotificationChannel::query()->where('enabled', false)->orderBy('name')->get(['id', 'name', 'type']),
         ]);
     }
 

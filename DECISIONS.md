@@ -639,6 +639,67 @@ production, `array`/database in local tests).
 
 ---
 
+## ADR-025: Permanent notification failures fail-then-throw so the worker dead-letters
+
+**Status** — Accepted (Phase 7, test-driven fix in Stage D step 4)
+
+**Context** — [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §12.3 requires exhausted/permanent delivery attempts to
+land in `failed_jobs` and stay visible. `App\Jobs\SendNotification` called `$this->fail()` and returned
+normally on permanent (`retryable = false`) results. A returned-normally job is deleted by the worker as
+succeeded, so the `failed` log row existed but `failed_jobs` stayed empty — permanent provider failures
+vanished from the queue's dead-letter record (`QueueFailureIsolationTest::test_failed_jobs_visible` failed).
+
+**Decision** — The permanent branch calls `$this->fail($error)` and then throws the same error, so the
+worker records the dead-letter in `failed_jobs` via its `JobFailed` listener. No retry semantics change:
+retryable results still `release()` with backoff, and per-channel isolation is untouched.
+
+**Consequences** — *Positive:* dead-letters are observable in `failed_jobs` as specified; direct `handle()`
+callers (tests, sync queue) now see the throw and must catch it. *Negative:* none — the throw carries the
+same redacted error already persisted to `notification_logs`.
+
+**Related** — [`PLAN.md`](PLAN.md) Phase 7; [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §12; ADR-010.
+
+---
+
+## ADR-026: 429 error page renders static copy (no `$message` variable)
+
+**Status** — Accepted (Phase 7, test-driven fix in Stage D step 4)
+
+**Context** — `resources/views/errors/429.blade.php` interpolated `{{ $message }}`, a variable the
+throttle-exception renderer never provides. Every throttled response therefore blew up into a 500
+`ViewException`, masking the 429 contract (`AuthRedactionTest::test_test_send_throttled` observed
+`302 × 10` then `500, 500` instead of 429s).
+
+**Decision** — The 429 page renders static copy ("You have made too many requests…"). No dynamic
+exception data is echoed on error pages (consistent with the Phase 1 no-leak contract).
+
+**Consequences** — *Positive:* throttled clients get a proper 429 page. *Negative:* none.
+
+**Related** — [`PLAN.md`](PLAN.md) Phase 7; `ErrorPageTest` (AC-1-06).
+
+---
+
+## ADR-027: Phase 7 notification implementation amendments
+
+**Status** — Accepted (Phase 7 Stage E)
+
+**Context** — [`PLAN.md`](PLAN.md) Phase 7 lists provider paths as `app/Services/Notifications/Providers/*` while [`ARCHITECTURE.md`](ARCHITECTURE.md) §3 lists `Dispatcher.php` + `Channels/*`. Code ships contract `app/Contracts/NotificationProvider.php`, dispatcher `app/Services/Notifications/NotificationDispatcher.php`, providers `app/Services/Notifications/Channels/*`, plus `NotificationProviderRegistry`, `NotificationIntents`, `MessageRedactor`, `CircuitBreaker`, jobs `DispatchIncidentNotifications` / `SendNotification`.
+
+**Decision**
+
+- Open-q3 closed as binding: absence of `website_notification_channel` rows means all enabled global channels (`DATABASE.md` §3.14, `NOTIFICATIONS.md` §13.1, `NotificationDispatcher::resolveChannels()`).
+- Path ratification: PLAN wins over old ARCHITECTURE names. Canonical paths are `app/Contracts/NotificationProvider.php`, `app/Services/Notifications/NotificationDispatcher.php`, `app/Services/Notifications/Channels/*`. ARCHITECTURE §3/§8 updated in same change.
+- Templates live in `resources/views/emails/` (HTML+text Blade pair), not `resources/views/mail/`.
+- Severity gate lives in `notification_channels.config.min_severity` (WARNING default, WARNING/CRITICAL allowed), checked before cooldown/dedupe.
+- No `notification_state` column: delivery state derived from `notification_logs` queries per incident/channel.
+- No `latency_ms` column: `DeliveryResult::$latency_ms` is runtime-only per `NOTIFICATIONS.md` §11.1 note.
+
+**Consequences** — *Positive:* single canonical path set; absence rule unambiguous. *Negative:* none.
+
+**Related** — [`PLAN.md`](PLAN.md) Phase 7; [`DATABASE.md`](DATABASE.md) §§3.13–3.16; [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §§2–4, 9, 11–13; ADR-010.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions

@@ -15,7 +15,7 @@
 <body>
     <div class="box">
         <h1>429 — Too Many Attempts</h1>
-        <p>{{ $message }}</p>
+        <p>You have made too many requests. Please wait a minute and try again.</p>
     </div>
 </body>
 </html>

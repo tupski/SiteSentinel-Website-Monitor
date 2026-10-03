@@ -7,6 +7,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
@@ -111,5 +112,14 @@ final class Website extends Model
     public function ruleSettings(): HasMany
     {
         return $this->hasMany(WebsiteRuleSetting::class);
+    }
+
+    /**
+     * Scoped notification channels. Absence rule: no rows = all enabled.
+     */
+    public function notificationChannels(): BelongsToMany
+    {
+        return $this->belongsToMany(NotificationChannel::class, 'website_notification_channel', 'website_id', 'channel_id')
+            ->withPivot('created_at');
     }
 }
