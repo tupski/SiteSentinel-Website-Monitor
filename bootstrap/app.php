@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Middleware\EnsureAdmin;
+use App\Http\Middleware\ThrottleStatusUnlock;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -18,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Admin authorization (SECURITY.md §3.2): alias used by the /admin route group.
         $middleware->alias([
             'admin' => EnsureAdmin::class,
+            'throttle.status-unlock' => ThrottleStatusUnlock::class,
         ]);
 
         // Redirect guests (login pages) back to login; authenticated users to the shell.

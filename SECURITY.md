@@ -277,9 +277,44 @@ The schema and policies leave room without a rewrite:
 | --- | --- | --- |
 | `/` | none | login form only |
 | `/admin/*` | session | authentication + admin gate + resource policy |
-| `/status` | none | `status_page_settings.visibility_mode` |
+| `/status`, `/status.json` | none | `status_page_settings.visibility_mode` (`Private` \| `Public` \| `Password Protected`) |
+| `/status/unlock` (POST) | none | status-page password, rate-limited (`throttle.status-unlock`) |
+| `/status/logout` (POST) | none | clears the status-page unlock session keys only |
 
 The canonical spec fixes these routes; no other top-level route may be introduced at MVP.
+
+### 3.5 Status page authorization, unlock, and isolation (Phase 8)
+
+The status page is **not session-authorized by the admin session**. Its access decision is made by
+`App\Http\Middleware\EnsureStatusVisibility` + `App\Services\StatusPage\VisibilityGate`, applied
+identically to HTML (`/status`) and JSON (`/status.json`):
+
+- **`Private`** — only an authenticated admin sees the projection; anyone else gets a bare `404`
+  (existence not advertised). `/status.json` likewise returns `404` to non-admins.
+- **`Public`** — anonymous access to the redacted projection only.
+- **`Password Protected`** — no data is rendered before a correct password. Locked HTML returns the
+  password form; locked JSON returns `403 {"message":"Locked."}`. If the mode is password-protected
+  but **no `password_hash` is set**, the gate fails closed with `404` (never renders data).
+
+**Unlock throttle (implemented).** `ThrottleStatusUnlock` allows **5 attempts per 10 minutes**, keyed
+`status-unlock:{ip}:{sessionId}` (per source IP **and** per session). Over the limit → `429` with a
+`Retry-After` header. A successful unlock clears the key (`RateLimiter::clear`).
+
+**Unlock session-flag shape (implemented).** A successful `Hash::check` writes three session keys —
+`status_page.unlocked_at` (ISO-8601 UTC), `status_page.settings_updated_at`
+(`v1:{status_page_settings.updated_at}`), and `status_page.version` (= `1`). `VisibilityGate` requires
+the presence of `unlocked_at` **and** a `hash_equals` match of the stamp; because the stamp derives
+from `updated_at`, rotating the password (or any settings change) immediately revokes all existing
+unlocks. `/status/logout` forgets all three keys and **never** logs out the admin session.
+
+**Cache isolation (implemented).** Only the redacted `PublicStatusDTO` is cached
+(`status:projection:v1:{sha1(mode)}:{updated_at}`); no raw `websites`/`incidents` row is ever stored,
+so a cache read cannot surface an unprojected field. The cache key contains no row identifier.
+
+**`noindex` (implemented).** Every status response sets `X-Robots-Tag: noindex, nofollow`; the views
+also emit `<meta name="robots" content="noindex, nofollow">`, and `public/robots.txt` disallows
+`/status` and `/admin`. Cache-control is `public, max-age=60` in `Public` mode and
+`no-store, private` otherwise.
 
 ---
 
@@ -691,7 +726,8 @@ Security-relevant events are written to `audit_logs` (columns: `user_id`, `event
 | `settings.changed` | A sensitive `settings` change (thresholds, retention). |
 | `channel.secret.updated` | A notification channel's `secret_ref` is updated. |
 | `channel.tested` | A channel test send. |
-| `status_page.visibility.changed` | `status_page_settings.visibility_mode` changed. |
+| `status_page.visibility.changed` | `status_page_settings.visibility_mode` changed (metadata `{from, to}`). |
+| `status_page.unlock.failed` | A status-page password attempt failed (metadata `reason` = `bad_password` \| `no_password_configured`). |
 | `retention.pruned` | A pruning job ran, with counts in `metadata`. |
 | `ssrf.blocked` | A probe hop was blocked by the SSRF policy (§5.6). |
 
@@ -810,7 +846,7 @@ items; earlier phases must still satisfy their own rows.
 ### Secrets
 - [ ] No plaintext secrets in DB, logs, or notifications (§4.2). — Phase 9
 - [ ] `notification_channels.secret_ref` uses encrypted casts; `config` holds non-secrets only. — Phase 5
-- [ ] `status_page_settings.password_hash` is hashed, never encrypted-reversible. — Phase 6
+- [ ] `status_page_settings.password_hash` is hashed, never encrypted-reversible. — Phase 8 (implemented)
 - [ ] Exception reporting redacts the denylist. — Phase 9
 - [ ] `.env` is never committed; placeholders only in `.env.example`. — Phase 1
 

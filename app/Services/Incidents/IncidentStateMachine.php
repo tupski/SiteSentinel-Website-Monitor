@@ -7,6 +7,7 @@ namespace App\Services\Incidents;
 use App\Models\Incident;
 use App\Models\IncidentEvent;
 use App\Models\User;
+use App\Services\StatusPage\StatusPageCache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -94,6 +95,8 @@ final class IncidentStateMachine
     /**
      * Apply a lifecycle transition atomically and append the timeline event.
      *
+     * Busts status projection post-commit. Never breaks write.
+     *
      * @param  array<string, mixed>|null  $metadata
      */
     public function apply(
@@ -104,7 +107,7 @@ final class IncidentStateMachine
         ?string $note = null,
         ?array $metadata = null,
     ): Incident {
-        return DB::transaction(function () use ($incident, $to, $actor, $eventType, $note, $metadata): Incident {
+        $result = DB::transaction(function () use ($incident, $to, $actor, $eventType, $note, $metadata): Incident {
             // Re-read under the transaction so concurrent actors converge on
             // one terminal state instead of double-transitioning a stale row.
             /** @var Incident $fresh */
@@ -145,6 +148,14 @@ final class IncidentStateMachine
 
             return $fresh;
         });
+
+        try {
+            StatusPageCache::bust();
+        } catch (Throwable $e) {
+            report($e);
+        }
+
+        return $result;
     }
 
     /**

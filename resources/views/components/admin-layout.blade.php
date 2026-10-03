@@ -18,6 +18,7 @@
                     <a href="{{ route('admin.incidents.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Incidents') }}</a>
                     <a href="{{ route('admin.notifications.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Channels') }}</a>
                     <a href="{{ route('admin.notification-logs.index') }}" class="text-slate-600 hover:text-slate-900">{{ __('Delivery log') }}</a>
+                    <a href="{{ route('admin.status-settings.edit') }}" class="text-slate-600 hover:text-slate-900">{{ __('Status page') }}</a>
                 </nav>
             </div>
             <form method="POST" action="{{ route('logout') }}">

@@ -137,6 +137,8 @@ Purpose: monitored websites and their monitoring configuration/state.
 | `scheme` | VARCHAR(10) | no | — | http/https |
 | `host` | VARCHAR(255) | no | — | normalized host |
 | `is_active` | TINYINT(1) | no | 1 | monitoring on/off |
+| `is_visible_on_status` | TINYINT(1) | no | 0 | status page publish toggle (Phase 8) |
+| `status_alias` | VARCHAR(255) | yes | NULL | public display alias (Phase 8, display mapping only) |
 | `check_interval_seconds` | INT UNSIGNED | no | 300 | cadence |
 | `timeout_seconds` | SMALLINT UNSIGNED | no | 10 | per request |
 | `expected_status` | SMALLINT UNSIGNED | no | 200 | expected HTTP status |
@@ -163,7 +165,8 @@ Purpose: monitored websites and their monitoring configuration/state.
 Keys/indexes: PK `id`; FK `current_baseline_id` -> `website_baselines.id`;
 `idx_websites_next_check_at` (`next_check_at`); `idx_websites_is_active_next_check_at`
 (`is_active`,`next_check_at`); `idx_websites_locked_at` (`locked_at`); `uq_websites_url` (`url`,
-**decision: enforce unique normalized URL** — see §7 Data Integrity).
+**decision: enforce unique normalized URL** — see §7 Data Integrity);
+`idx_websites_visible_status` (`is_active`,`is_visible_on_status`) (Phase 8 status page publish filter).
 
 ### 3.5 `website_baselines`
 
@@ -485,6 +488,14 @@ separately for clarity.
 
 Keys/indexes: PK `id`; `uq_status_page_settings_slug` (`slug`).
 
+**Singleton.** This table holds a single logical row (id = 1). `StatusPageSetting::singleton()`
+resolves it via `firstOrCreate(['id' => 1], [...])`, creating a `Private`/no-password/no-branding row
+on first access — there is no seeder dependency. The Phase 8 migration
+(`0001_08_01_000000_create_status_page_settings_table.php`) creates the table verbatim to this
+section and adds a MySQL `CHECK (visibility_mode IN ('Private','Public','Password Protected'))`
+constraint (best-effort on SQLite). `password_hash` is a one-way hash and is in the model's
+`$hidden` list.
+
 ### 3.19 `audit_logs`
 
 Purpose: admin action + auth event audit trail.
@@ -560,6 +571,8 @@ expected growth (§6).
 | Open-incident dedupe lookup | `idx_incidents_dedupe_key` + `idx_incidents_website_status` |
 | Incident list by status/time | `idx_incidents_status_detected_at` |
 | Status page aggregation | `idx_checks_website_started_at` + `websites.status_availability` snapshot |
+| Status page publish filter | `idx_websites_visible_status` (`is_active`,`is_visible_on_status`) — Phase 8 projector row selection |
+| Status page response band | latest `checks.duration_ms` by `idx_checks_website_started_at` (per published website) |
 | Notification dedupe lookup | `idx_notification_logs_dedupe_key` + `uq_notification_cooldowns_key` |
 | Retention pruning | `idx_checks_created_at`, `idx_incidents_created_at`, `idx_notification_logs_created_at`, `idx_snapshots_expires_at` |
 

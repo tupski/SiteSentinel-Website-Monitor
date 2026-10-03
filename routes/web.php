@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Admin\IncidentController;
 use App\Http\Controllers\Admin\NotificationChannelController;
+use App\Http\Controllers\Admin\StatusPageSettingController;
 use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\HealthController;
+use App\Http\Controllers\StatusPageController;
 use Illuminate\Support\Facades\Route;
 
 // Public: health endpoint only (Phase 1 contract preserved).
@@ -55,4 +57,13 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'admin'])->group(fun
     Route::post('notifications/{channel}/test-send', [NotificationChannelController::class, 'testSend'])->middleware('throttle:10,1')->name('notifications.test-send');
 
     Route::get('notification-logs', [NotificationChannelController::class, 'logs'])->name('notification-logs.index');
+
+    Route::get('status-settings', [StatusPageSettingController::class, 'edit'])->name('status-settings.edit');
+    Route::put('status-settings', [StatusPageSettingController::class, 'update'])->name('status-settings.update');
 });
+
+// Public status page (Phase 8). Same gate for HTML + JSON.
+Route::get('/status', [StatusPageController::class, 'show'])->name('status.show');
+Route::get('/status.json', [StatusPageController::class, 'json'])->name('status.json');
+Route::post('/status/unlock', [StatusPageController::class, 'unlock'])->middleware('throttle.status-unlock')->name('status.unlock');
+Route::post('/status/logout', [StatusPageController::class, 'logout'])->name('status.logout');

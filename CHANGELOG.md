@@ -1,5 +1,25 @@
 # Changelog
 
+## [2026-10-03]
+
+### Added (Phase 8 — Public Status Page)
+- Migrations `0001_08_01_000000_create_status_page_settings_table` (verbatim `DATABASE.md` §3.18: `visibility_mode` ENUM default `Private`, `password_hash`, `slug` unique `uq_status_page_settings_slug`, `branding` JSON, timestamps; MySQL `CHECK` on the enum) and `0001_08_02_000000_add_status_visibility_to_websites_table` (additive `websites.is_visible_on_status` default `0`, `websites.status_alias`, index `idx_websites_visible_status`).
+- Model `App\Models\StatusPageSetting` — singleton via `firstOrCreate(['id' => 1])`, mode predicates (`isPrivate`/`isPublic`/`isPasswordProtected`), `password_hash` hidden.
+- Services `App\Services\StatusPage\*`: `StatusProjector` (single redaction chokepoint; reads `websites` snapshot columns + open incident severity only), `PublicStatusDTO` (allowlist `banner`/`services[]`/`updatedDayBucket`), `VisibilityGate` (mode decision + `v1:{updated_at}` unlock-stamp check), `StatusPageUnlockService` (`Hash::check`, three session keys, throttle clear, audit), `StatusPageCache` (DTO-only cache, `bust()`).
+- Middleware `EnsureStatusVisibility` (single HTML+JSON gate; `noindex` + cache-control) and `ThrottleStatusUnlock` (5 attempts / 10 min per IP+session, `429` + `Retry-After`).
+- Controllers `StatusPageController` (`show`, `json`, `unlock`, `logout`) and admin `StatusPageSettingController`; Form Request `UpdateStatusPageSettingsRequest` (fail-closed: `confirm_public` for Public, password required for Password Protected).
+- Routes `GET /status`, `GET /status.json`, `POST /status/unlock`, `POST /status/logout`, admin `status-settings` edit/update; views `status/show`, `status/unlock`, `status/_history`, `admin/status-settings/form`; admin nav entry; `public/robots.txt` disallows `/status` + `/admin`; `config/sentinel.php` `status_page` block (`ttl_floor` 60, `stale_multiplier` 2, `stale_floor` 300, `unlock_max` 5, `unlock_window` 10, `history_enabled` false, `band_normal` 800, `band_slow` 2500, `cache_prefix`).
+- Cache-bust hooks post-commit in `IncidentEngine`, `IncidentStateMachine::apply()`, and the admin settings save (failure-isolated `try/catch`+`report`; never break the write).
+- Feature test suite `tests/Feature/StatusPage/*` — **94 tests**, all passing — covering the STATUS-PAGE §12 acceptance criteria: redaction regression with 17 canaries across every mode/unlock state, visibility gate, password unlock/throttle/rotation, derivation allowlist, staleness, projection cache, HTTP surface, no-SSRF, and enumeration resistance. All assert observable response bodies only; no live network.
+- Docs: `ADR-029` (frozen Phase 8 choices: publish columns, stale floor 300 s, throttle 5/10 min, rotation via `updated_at`, history default off, slug storage-only, bands, count hidden, `status.json` included, singleton first-or-create); `STATUS-PAGE.md` implementation notes + §13 ops troubleshooting; `ARCHITECTURE.md` §10 component/cache/no-probe tables; `DATABASE.md` §3.18 singleton + hot path; `SECURITY.md` §3.5 route/throttle/session/cache/noindex; `PLAN.md` AC-8-01..08 DoD evidence.
+
+### Fixed (Phase 8 — test-driven, ADR-028)
+- Empty published set now derives `banner = Unknown` instead of fabricating `Operational` (`StatusProjector::banner()`; STATUS-PAGE §6.3 "No fabrication").
+- Failed unlock now raises `ValidationException` (uniform `422` for JSON clients, redirect-back-with-errors for the form) instead of a bare `back()->withErrors(...)` `302`, so no service data is ever rendered on a failed unlock (STATUS-PAGE §3.4 / §12.1).
+
+### Verified (Phase 8 close)
+- Full suite **329 tests, 324 passed, 5 pre-existing `sessions` env failures** — identical to the pre-Phase-8 baseline (235 total / 5 failures at Phase 7 close); zero new failures, zero regressions. Pint clean (160 files); `npm run build` succeeds; all migrations `Ran`.
+
 ## [2026-09-30]
 
 ### Added (Phase 6 — Incident Management)

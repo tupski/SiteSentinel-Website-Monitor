@@ -188,4 +188,16 @@ return [
         'idle_timeout_minutes' => (int) env('SENTINEL_IDLE_TIMEOUT_MINUTES', 30),
         'absolute_timeout_minutes' => (int) env('SENTINEL_ABSOLUTE_TIMEOUT_MINUTES', 480),
     ],
+
+    'status_page' => [
+        'ttl_floor' => (int) env('SENTINEL_STATUS_TTL_FLOOR', 60),
+        'stale_multiplier' => (int) env('SENTINEL_STATUS_STALE_MULTIPLIER', 2),
+        'stale_floor' => (int) env('SENTINEL_STATUS_STALE_FLOOR', 300),
+        'unlock_max' => (int) env('SENTINEL_STATUS_UNLOCK_MAX', 5),
+        'unlock_window' => (int) env('SENTINEL_STATUS_UNLOCK_WINDOW', 10),
+        'history_enabled' => (bool) env('SENTINEL_STATUS_HISTORY_ENABLED', false),
+        'band_normal' => (int) env('SENTINEL_STATUS_BAND_NORMAL', 800),
+        'band_slow' => (int) env('SENTINEL_STATUS_BAND_SLOW', 2500),
+        'cache_prefix' => (string) env('SENTINEL_STATUS_CACHE_PREFIX', 'status:projection:v1'),
+    ],
 ];

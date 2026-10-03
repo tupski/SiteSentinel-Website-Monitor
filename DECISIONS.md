@@ -700,6 +700,93 @@ exception data is echoed on error pages (consistent with the Phase 1 no-leak con
 
 ---
 
+## ADR-028: Phase 8 status-page test-driven amendments (empty projection + unlock error shape)
+
+**Status** — Accepted (Phase 8 Stage C tests)
+
+**Context** — Authoring the mandatory redaction/derivation/unlock regression tests
+(STATUS-PAGE.md §12) surfaced two observable behaviours that did not match the
+spec's own acceptance criteria and could not be asserted without a change:
+
+1. **Empty projection banner.** `StatusProjector::banner()` seeded its running
+   worst-label at `Operational`, so a page with **no published services** returned
+   `banner = "Operational"`. STATUS-PAGE.md §6.3 ("No fabrication") states the
+   projection MUST NOT invent a label not derivable from the inputs; an empty set
+   has no derivable status.
+2. **Wrong-password error shape.** `StatusPageController::unlock()` returned
+   `back()->withErrors(...)`, which yields a **302 redirect** for JSON clients.
+   STATUS-PAGE.md §3.4 / §12.1(3) require a wrong password to be rejected
+   uniformly with **no data ever rendered**; a JSON client should receive a
+   deterministic error status (422), matching the existing missing/empty-password
+   path already produced by `$request->validate(...)`.
+
+**Decision**
+
+- `StatusProjector::banner()` returns `Unknown` when the published-service set is
+  empty (never `Operational`). No other ranking behaviour changes.
+- `StatusPageController::unlock()` throws `ValidationException::withMessages(['password' => 'Incorrect password.'])`
+  instead of `back()->withErrors(...)`. This preserves the browser contract
+  (302 redirect back with form errors) **and** gives JSON clients a uniform 422 —
+  the same shape as a missing/empty password — so no service data is ever
+  rendered on a failed unlock.
+
+**Alternatives considered** — Leaving the empty banner as `Operational` (rejected —
+violates §6.3 and would mislead visitors); returning a bespoke `403` for JSON
+unlock failures (rejected — inconsistent with the validation error path and the
+required uniform error shape).
+
+**Consequences** — *Positive:* the spec's own acceptance criteria are now directly
+assertable; empty and failed-unlock responses are non-fabricating and uniform.
+*Negative:* none observable — both are fail-closed, data-free responses.
+
+**Related** — [`STATUS-PAGE.md`](STATUS-PAGE.md) §3.4, §6.3, §12.1, §12.2;
+ADR-013.
+
+---
+
+## ADR-029: Phase 8 status-page implementation — concrete choices frozen from the spec's open numerics
+
+**Status** — Accepted (Phase 8 implementation)
+
+**Context** — [`STATUS-PAGE.md`](STATUS-PAGE.md) fixed the *behaviour* of the status page but left
+several numeric and storage choices open ("recommended", "not fixed at MVP", "if implemented"). The
+Phase 8 implementation had to choose concrete values. This ADR records them so the code and the spec
+cannot drift silently; each choice stays within the existing redaction boundary
+([`PRD.md`](PRD.md) §14.4, ADR-013) and adds no product feature.
+
+**Decision** — the following are frozen:
+
+| Area | Choice | Rationale |
+| --- | --- | --- |
+| **Publish columns** | `websites.is_visible_on_status` (bool, default `0`) + `websites.status_alias` (nullable `VARCHAR(255)`) + `idx_websites_visible_status`, rather than a join table | One-to-one display mapping; keeps the projector a single indexed query (`FR-83`) |
+| **Stale floor** | `max(stale_multiplier(2) × check_interval_seconds, stale_floor(300 s))` | Bounded multiple of cadence with an absolute floor so a very short interval cannot mark a site stale instantly; missing `last_checked_at` is always stale (§6.4) |
+| **Unlock throttle** | 5 attempts / 10 minutes, keyed `status-unlock:{ip}:{sessionId}`; `429` + `Retry-After`; clear on success | Per-IP + per-session limits password guessing without a global lockout (§3.4) |
+| **Rotation mechanism** | Unlock stamp = `v1:{status_page_settings.updated_at}` compared with `hash_equals`; any settings save advances `updated_at` and revokes all unlocks | No extra version column; a password/settings change revokes access immediately (§3.2, §3.5) |
+| **History** | Default **off**; gated by `sentinel.status_page.history_enabled`; **not persisted** (no schema column) | Frozen §3.18 schema has no history column; MVP ships the spec's optional history off (§7.2) |
+| **Slug** | **Storage-only** — validated/persisted, not used for routing, not rendered | Custom path is `FR-84` Future; routing stays `/status` |
+| **Response bands** | `<= 800 ms` → `normal`; `<= 2500 ms` → `slow`; `> 2500 ms` → `slow`; omitted when no timing | Coarse band only, never the exact ms figure (§4.3) |
+| **Service count** | **Not published** anywhere in HTML or JSON | The count is reconnaissance (§10.2) |
+| **`status.json`** | **Included** — same redacted DTO as HTML | Cheap machine-readable surface with no extra data |
+| **Singleton resolution** | `firstOrCreate(['id' => 1])` | No seeder dependency; the table always has its logical row (DATABASE §3.18) |
+| **Cache** | DTO-only, key `status:projection:v1:{sha1(mode)}:{updated_at}`, TTL `max(60, shortest published interval)`; busted post-commit | Redaction runs once; key carries no row identifier (§9.1, §9.2) |
+
+**Alternatives considered** — A separate `status_page_websites` join table (rejected: heavier for a
+pure display mapping); a `history_enabled` column on `status_page_settings` (rejected: the frozen
+§3.18 schema is authoritative and additive-only, and history is optional); a persisted password
+version column (rejected: `updated_at` already provides a monotonic stamp with no schema change); a
+separate `critical` band (rejected: the spec's two-band example is `normal`/`slow`).
+
+**Consequences** — *Positive:* the spec's open numerics are now concrete, testable, and documented;
+the redaction boundary and no-probe/no-notify posture are unchanged. *Negative:* the admin history
+toggle is cosmetic until a schema change is approved (noted inline in STATUS-PAGE §7.2); a manual SQL
+edit that does not touch `updated_at` will not revoke unlocks (documented in STATUS-PAGE §13.1).
+
+**Related** — [`STATUS-PAGE.md`](STATUS-PAGE.md) §3.2, §3.4, §4.3, §5.2, §6.4, §6.6, §7.2, §8.5,
+§9.2, §10.2, §11.1, §13; [`DATABASE.md`](DATABASE.md) §3.18, §3.4, §5; [`SECURITY.md`](SECURITY.md)
+§3.5; ADR-013, ADR-028; [`PLAN.md`](PLAN.md) Phase 8.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions

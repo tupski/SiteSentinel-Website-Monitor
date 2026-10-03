@@ -373,21 +373,60 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Req[GET /status] --> Vis{status_page_settings.visibility_mode}
+    Req[GET /status or /status.json] --> MW[EnsureStatusVisibility middleware]
+    MW --> Vis{status_page_settings.visibility_mode}
     Vis -- Private --> Auth{Authenticated admin?}
     Auth -- no --> NotFound[404 / not available]
     Auth -- yes --> Agg
-    Vis -- Public --> Agg[Aggregate availability per website]
-    Vis -- Password Protected --> Gate{Password verified?}
-    Gate -- no --> Prompt[Password prompt]
+    Vis -- Public --> Agg[PublicStatusDTO projection]
+    Vis -- Password Protected --> Gate{VisibilityGate::isUnlocked?}
+    Gate -- no --> Prompt[Password prompt - no data]
+    Gate -- no-hash --> NotFound
     Gate -- yes --> Agg
-    Agg --> Project[Public-safe projection]
-    Project --> Redact[Strip security detail, technical metadata, snapshots]
-    Redact --> Render[Render availability/status only]
+    Agg --> Cache[StatusPageCache::remember DTO-only]
+    Cache --> Project[StatusProjector - reads website snapshot + open incident severity only]
+    Project --> Redact[Allowlist: banner, services, updatedDayBucket]
+    Redact --> Render[Render HTML / JSON - noindex]
 ```
 
 The public projection exposes availability and coarse status only. Security detail, technical
 metadata, rule names, scores, and snapshot artifacts are stripped (see `DECISIONS.md` ADR-013).
+
+### 10.1 Components (Phase 8, as implemented)
+
+| Component | Path | Responsibility |
+| --- | --- | --- |
+| Controller | `app/Http/Controllers/StatusPageController.php` | Thin: `show` (HTML), `json` (`/status.json`), `unlock`, `logout`; sets `noindex` + cache-control |
+| Middleware (visibility) | `app/Http/Middleware/EnsureStatusVisibility.php` | Single gate for HTML + JSON; locked password mode renders the form only; private/no-hash → `404` |
+| Middleware (throttle) | `app/Http/Middleware/ThrottleStatusUnlock.php` | 5 attempts / 10 min per `ip+session`; `429` + `Retry-After` |
+| Visibility decision | `app/Services/StatusPage/VisibilityGate.php` | Mode decision + unlock session-stamp check (`status_page.unlocked_at` / `settings_updated_at`) |
+| Unlock | `app/Services/StatusPage/StatusPageUnlockService.php` | `Hash::check`, writes the three session keys, clears the throttle, audits failures |
+| Projection | `app/Services/StatusPage/StatusProjector.php` | The single redaction chokepoint; reads `websites` snapshot columns + open incident severity only |
+| DTO | `app/Services/StatusPage/PublicStatusDTO.php` | Allowlist view model: `banner`, `services[]`, `updatedDayBucket` |
+| Cache | `app/Services/StatusPage/StatusPageCache.php` | DTO-only cache (`status:projection:v1:{modeHash}:{stamp}`); `bust()` post-commit |
+| Model | `app/Models/StatusPageSetting.php` | `singleton()` (first-or-create `id=1`), mode predicates |
+| Admin controller | `app/Http/Controllers/Admin/StatusPageSettingController.php` | Edit/update mode, password, branding, per-website publish + alias; audits + busts cache |
+| Request | `app/Http/Requests/UpdateStatusPageSettingsRequest.php` | Fail-closed validation (`confirm_public`, password required for password mode) |
+
+### 10.2 Cache flow
+
+1. `StatusPageCache::remember()` computes key `status:projection:v1:{sha1(mode)}:{updated_at}` with TTL
+   `max(60, min(published check_interval_seconds))`.
+2. On a miss it calls `StatusProjector::project()` — which reads only the `websites` snapshot columns
+   (`status_availability`, `status_security`, `last_checked_at`) and open incident **severity** — and
+   stores the resulting `PublicStatusDTO`.
+3. The DTO is the only cached artefact; no raw row is ever cached, so a cache read cannot leak an
+   unprojected field (STATUS-PAGE.md §9.1).
+4. `StatusPageCache::bust()` is invoked **post-commit** and failure-isolated (`try/catch` + `report`)
+   from `IncidentEngine`, `IncidentStateMachine::apply()`, and the admin settings save. An admin save
+   also advances `updated_at`, rolling the key forward.
+
+### 10.3 No-probe / no-notify plane
+
+The status page lives entirely on the **web/UI plane**. It performs **no outbound HTTP fetch** (no
+SSRF surface, no probe), enqueues **no jobs**, and dispatches **no notifications** — rendering is a
+read of already-persisted snapshot columns plus the projection cache. This keeps `/status` cheap and
+safe as the only high-traffic public endpoint (STATUS-PAGE.md §9.3, §10.1).
 
 ---
 

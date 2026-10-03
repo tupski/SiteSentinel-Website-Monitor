@@ -942,11 +942,19 @@ Deliver `/status` in three visibility modes with the **redaction boundary enforc
 
 ### Definition of Done
 
-- [ ] `AC-8-01` … `AC-8-08` met.
-- [ ] Redaction regression test passing across all three modes.
-- [ ] `status_page_settings` matches [`DATABASE.md`](DATABASE.md).
-- [ ] CI green; no regression to Phase 6/7.
-- [ ] Docs updated if visibility deviated from [`STATUS-PAGE.md`](STATUS-PAGE.md).
+- [x] `AC-8-01` … `AC-8-08` met — evidence: `tests/Feature/StatusPage/*` (94 tests, all passing).
+  - `AC-8-01` all three modes render: `VisibilityGateTest`, `StatusPageHttpTest`.
+  - `AC-8-02` no data before unlock: `PasswordGateTest`, `RedactionRegressionTest::test_password_locked_projection_never_leaks_canaries`.
+  - `AC-8-03` no keywords/domains/redirects/rule-ids/snapshots in the raw response: `RedactionRegressionTest` (17 canaries × every mode/unlock state) + `EnumerationTest`.
+  - `AC-8-04` `SUSPECT` → `Degraded` (never a security label): `DerivationTest`.
+  - `AC-8-05` stale → `Unknown`, never `Operational`: `StalenessTest` (300 s floor).
+  - `AC-8-06` `noindex`: `StatusPageHttpTest` (header + meta + `robots.txt`).
+  - `AC-8-07` cached artefact is the projection only: `CacheTest`.
+  - `AC-8-08` no outbound request: `NoSsrfTest`.
+- [x] Redaction regression test passing across all three modes — `RedactionRegressionTest` (release blocker) green.
+- [x] `status_page_settings` matches [`DATABASE.md`](DATABASE.md) §3.18 verbatim; additive `websites.is_visible_on_status` + `status_alias` + `idx_websites_visible_status` (`0001_08_02`).
+- [x] CI green; no regression to Phase 6/7 — full suite **329 tests, 324 passed, 5 pre-existing `sessions` env failures** (baseline unchanged; zero new failures).
+- [x] Docs updated where visibility deviated from [`STATUS-PAGE.md`](STATUS-PAGE.md) — `ADR-029` records the frozen choices; STATUS-PAGE/ARCHITECTURE/DATABASE/SECURITY/CHANGELOG updated.
 
 ### Risks / Watch-outs
 

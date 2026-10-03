@@ -7,6 +7,7 @@ namespace App\Services\Incidents;
 use App\Models\Check;
 use App\Models\Incident;
 use App\Models\Website;
+use App\Services\StatusPage\StatusPageCache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -45,6 +46,12 @@ final class IncidentEngine
         $incident = $this->reconcileAvailability($website, $check);
 
         $security = $this->reconcileSecurity($website, $check, $detection);
+
+        try {
+            StatusPageCache::bust();
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return $security ?? $incident;
     }

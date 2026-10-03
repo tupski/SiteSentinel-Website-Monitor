@@ -21,6 +21,8 @@ use Illuminate\Support\Carbon;
  * @property string $scheme
  * @property string $host
  * @property bool $is_active
+ * @property bool $is_visible_on_status
+ * @property string|null $status_alias
  * @property int $check_interval_seconds
  * @property int $timeout_seconds
  * @property int $expected_status
@@ -55,6 +57,8 @@ final class Website extends Model
         'scheme',
         'host',
         'is_active',
+        'is_visible_on_status',
+        'status_alias',
         'check_interval_seconds',
         'timeout_seconds',
         'expected_status',
@@ -81,6 +85,7 @@ final class Website extends Model
     {
         return [
             'is_active' => 'boolean',
+            'is_visible_on_status' => 'boolean',
             'follow_redirects' => 'boolean',
             'monitor_ssl' => 'boolean',
             'monitor_redirects' => 'boolean',

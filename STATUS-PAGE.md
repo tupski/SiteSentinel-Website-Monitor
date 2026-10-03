@@ -1,8 +1,15 @@
 # STATUS-PAGE.md — SiteSentinel — Website Monitoring & Security Alerts
 
-> **Specification only.** Nothing described in this document has been implemented.
-> Every statement is future/conditional ("the page will…", "Phase 6 implements…").
-> There is no application code and there are no migrations at the time of writing.
+> **Status: implemented (Phase 8).** The public status page described here now exists in
+> application code — `app/Http/Controllers/StatusPageController.php`,
+> `app/Services/StatusPage/*`, migrations `0001_08_01_*`/`0001_08_02_*`, and the
+> `tests/Feature/StatusPage/*` suite (94 tests). This document remains the authoritative
+> specification for **presentation**; where the implementation makes a previously-open
+> numeric or storage choice concrete (throttle limits, staleness floor, response bands,
+> slug storage, history default), that choice is recorded inline below and in
+> [`DECISIONS.md`](DECISIONS.md) `ADR-029`. Statements still phrased as recommendations
+> remain recommendations; where implementation is narrower than the recommendation, the
+> narrower actual behaviour is stated explicitly.
 
 > **Authority.** [`PRD.md`](PRD.md) §14 fixes the status page's visibility modes and the
 > public/private boundary; this document is the detailed source of truth for **presentation** —
@@ -130,6 +137,21 @@ spec, [`PRD.md`](PRD.md) §14.1, and the `status_page_settings.visibility_mode` 
 - The unlock is scoped to the **status page**, not to `/admin`. It grants no admin capability.
 - Session cookies use `Secure`/`HttpOnly`/`SameSite` flags (`NFR-11`).
 
+**Implemented session-flag shape (Phase 8, `ADR-029`).** `App\Services\StatusPage\VisibilityGate`
+and `StatusPageUnlockService` write three session keys on a successful unlock:
+
+| Session key | Value | Purpose |
+| --- | --- | --- |
+| `status_page.unlocked_at` | ISO-8601 UTC timestamp | Presence marks the session as unlocked |
+| `status_page.settings_updated_at` | `v1:{settings.updated_at ISO-8601}` version stamp | Compared with `hash_equals` against the current stamp |
+| `status_page.version` | `1` | Schema/format version of the flag |
+
+`VisibilityGate::isUnlocked()` requires `status_page.unlocked_at` to be present **and** the stored
+stamp to equal the current `versionStamp()` (`'v1:'.updated_at`). `StatusPageUnlockService::lock()`
+(and the `POST /status/logout` route) forgets all three keys. Because the stamp is derived from
+`status_page_settings.updated_at`, changing the password — or any other settings field — advances
+`updated_at` and immediately revokes every existing unlock (see §3.5).
+
 ### 3.3 No username required
 
 - The status page is **password-only** — there is no username field and no account. This is a shared
@@ -146,10 +168,23 @@ spec, [`PRD.md`](PRD.md) §14.1, and the `status_page_settings.visibility_mode` 
 - Failed attempts SHOULD be auditable (`audit_logs`, [`DATABASE.md`](DATABASE.md) §3.19) so an
   operator can see someone probing the status page.
 
+**Implemented numerics (Phase 8, `ADR-029`).** The concrete parameters are now fixed in
+`config/sentinel.php` (`status_page`) and enforced by `App\Http\Middleware\ThrottleStatusUnlock`:
+
+| Parameter | Value | Notes |
+| --- | --- | --- |
+| `unlock_max` | **5 attempts** | per throttle window |
+| `unlock_window` | **10 minutes** | window length (decay floor 60 s) |
+| Throttle key | `status-unlock:{ip}:{sessionId}` | **per source IP + per session** — the composite key |
+| Over-limit response | `429` + `Retry-After` header | `Retry-After` = seconds until the key decays |
+| Reset on success | `RateLimiter::clear()` | a correct password clears the counter for that key |
+
+Failed attempts are audited as `status_page.unlock.failed` with a reason
+(`no_password_configured` when fail-closed on a missing hash, `bad_password` on a hash-check miss).
+
 This throttle is separate from the admin login lockout in [`SECURITY.md`](SECURITY.md) §2.4
-(`FR-06`). The behaviour (throttle + backoff + audit) is fixed here; concrete per-IP/per-session
-numeric parameters for the status-page password are not fixed at MVP and are ratified in
-[`SECURITY.md`](SECURITY.md) §3.4 (see the audit report's open questions).
+(`FR-06`). The behaviour (throttle + backoff + audit) is fixed here; the numeric parameters above
+are the Phase 8 implementation and are ratified in [`SECURITY.md`](SECURITY.md) §3.4.
 
 ### 3.5 Independence from admin credentials
 
@@ -227,10 +262,14 @@ notification configuration, delivery logs, and failure states.
 ### 4.3 What IS public
 
 - The **website/service display name** — the admin chooses whether to expose the real `websites.name`
-  or an **alias** (§11).
+  or an **alias** (§11). The implemented display value is `status_alias` when set, else `name`.
 - A **coarse status label** drawn from the fixed set in §5.
 - An **optional coarse response-time band** (never an exact millisecond figure that could fingerprint
-  infrastructure).
+  infrastructure). **Implemented bands (Phase 8, `ADR-029`):** derived from the latest check's
+  `duration_ms` — `<= 800 ms` → `normal`, `<= 2500 ms` → `slow`, `> 2500 ms` → `slow`
+  (`band_normal = 800`, `band_slow = 2500`; config `sentinel.status_page`, overridable via
+  `SENTINEL_STATUS_BAND_NORMAL` / `SENTINEL_STATUS_BAND_SLOW`). The band is omitted when there is no
+  timing. The exact millisecond value is never emitted.
 - A coarse **incident** indication **only** where §5 permits it.
 
 ### 4.4 Worked before/after example
@@ -293,6 +332,13 @@ must not be invertible back to one.
 Recommended public labels: `Operational`, `Degraded`, `Partial Outage`, `Major Outage`, `Incident`,
 and `Under Maintenance` (if/when applicable).
 
+**Implemented label set (Phase 8, `ADR-029`).** `StatusProjector` emits exactly these six labels:
+`Operational`, `Unknown`, `Degraded`, `Incident`, `Partial Outage`, `Major Outage`. There is **no
+`Under Maintenance` label** at MVP (no admin maintenance-marking feature exists); that row of §5.3
+is therefore not implemented. The banner-worst ordering used for aggregation is
+`Major Outage > Partial Outage > Incident > Degraded > Unknown > Operational` (§6.6), and an empty
+published set derives `Unknown` (never `Operational`, §6.3).
+
 ### 5.3 Derivation table (internal → public)
 
 | Internal availability | Internal security | Active incident severity | Public label |
@@ -321,6 +367,14 @@ Notes:
   intentional and correct."
 - `INFO` NEVER creates an incident ([`PRD.md`](PRD.md) §11.3), so it never lifts a label above
   `Operational`.
+
+**Implemented derivation (Phase 8, `ADR-029`).** `StatusProjector::deriveLabel()` applies, in order:
+(1) stale → `Unknown`; (2) `status_availability = 'DOWN'` → `Major Outage` when the worst open
+severity is `CRITICAL`, else `Partial Outage`; (3) `status_security = 'INCIDENT'` **or** worst open
+severity `CRITICAL` → `Incident`; (4) `status_security = 'SUSPECT'` **or** worst open severity
+`WARNING` → `Degraded`; (5) otherwise `Operational`. `INFO` never lifts a label. Open incidents are
+`incidents` rows with `status IN ('DETECTED','ACKNOWLEDGED')`, reduced to the worst severity per
+website. This matches the §5.3 table.
 
 ### 5.4 Why `SUSPECT` is deliberately ambiguous
 
@@ -378,13 +432,19 @@ as a hot path served by `idx_checks_website_started_at` + the `websites.status_a
 
 - The system knows each website's `check_interval_seconds` and `last_checked_at`.
 - **Stale threshold** — if `last_checked_at` is older than a bounded multiple of the expected
-  interval (recommended: `max(2 × check_interval_seconds, a small floor)`), the website is presented
-  as **`Unknown`** (or `Stale`) rather than its last known label.
+  interval, the website is presented as **`Unknown`** rather than its last known label.
+- **Implemented threshold (Phase 8, `ADR-029`).** `StatusProjector::isStale()` uses
+  `max(stale_multiplier × check_interval_seconds, stale_floor)` with
+  `stale_multiplier = 2` and **`stale_floor = 300 s`** (config `sentinel.status_page`, overridable via
+  `SENTINEL_STATUS_STALE_MULTIPLIER` / `SENTINEL_STATUS_STALE_FLOOR`). A missing
+  `last_checked_at` is always stale. The comparison is UTC-normalised; the label is exactly
+  **`Unknown`** (not `Stale`).
 - **Hard rule:** *a website with no recent successful check MUST NOT be shown as `Operational`.*
   Showing a healthy label off the back of a stale snapshot would actively mislead the visitor and is
   the exact failure mode `HTTP 200 != healthy` warns against, transposed to the page.
-- A website with `is_active = 0` is not monitored; it SHOULD be excluded from the page rather than
-  shown as `Operational`.
+- A website with `is_active = 0` is not monitored; it is excluded from the page rather than
+  shown as `Operational` (`StatusProjector` filters `is_active = true` **and**
+  `is_visible_on_status = true`).
 
 ### 6.5 Calculation flowchart
 
@@ -413,9 +473,13 @@ flowchart TD
 ### 6.6 Overall banner aggregation
 
 - The page-level banner is the **worst** coarse label across published websites, in order of severity:
-  `Major Outage` > `Partial Outage` > `Incident` > `Degraded` > `Operational`. `Unknown` sites are
-  surfaced separately (e.g. "some services report stale data") rather than silently counted as
-  healthy.
+  `Major Outage` > `Partial Outage` > `Incident` > `Degraded` > `Unknown` > `Operational`.
+- **Implemented ordering (Phase 8, `ADR-029`).** `StatusProjector::banner()` ranks exactly
+  `Major Outage`(5) > `Partial Outage`(4) > `Incident`(3) > `Degraded`(2) > `Unknown`(1) >
+  `Operational`(0). An **empty published set derives `Unknown`** — never `Operational` (§6.3).
+  `Unknown` sites are **not** surfaced as a separate list message; they participate in the banner
+  ranking and appear as their own row label (`Unknown`), so a stale-only page shows an `Unknown`
+  banner rather than a false `Operational`.
 - The banner MUST NOT name the cause (no rule ids, no domains) — only the coarse worst case.
 
 ---
@@ -439,6 +503,12 @@ flowchart TD
 
 - A public-safe timeline MAY show previous incidents as coarse summaries (day-level, label-only),
   if the admin enables history.
+- **Implemented default: history is OFF (Phase 8, `ADR-029`).** The history block is gated by
+  `config('sentinel.status_page.history_enabled')` (`SENTINEL_STATUS_HISTORY_ENABLED`), default
+  **`false`**; the admin form exposes an "Enable day-level history (default off)" checkbox, but the
+  frozen `status_page_settings` schema (§3.18) has no history column, so the toggle is **not
+  persisted** — history renders only when the deployment config enables it. When enabled it renders
+  the current per-service `displayName` + `publicLabel` + `dayBucket` rows only (`status._history`).
 - The public timeline MUST NOT include: incident type, severity, rule attribution, evidence,
   resolution notes, or any field from the §4.1 admin column.
 - The per-website **admin** timeline (`FR-61`) — which interleaves checks, incident events, and
@@ -488,6 +558,12 @@ flowchart TD
   HTML is complete and correct on first paint; the poll merely re-fetches it. This is required by the
   server-rendered, no-SPA architecture and is an accessibility baseline.
 
+**Implemented behaviour (Phase 8, `ADR-029`).** The delivered `resources/views/status/show.blade.php`
+is a plain server-rendered Blade document that loads the Vite CSS/JS bundle; it does **not** ship a
+Turbo polling element or meta-refresh at MVP. The page is complete and correct on first paint with
+JavaScript disabled, and the freshness signal is the day-level "Updated" line (§8.1). The projection
+cache TTL (§9.2) bounds how stale a served page may be; a visitor reloads to observe new state.
+
 ### 8.3 Branding / settings
 
 - Title, logo, footer, and a custom message come from `status_page_settings.branding` (JSON) and the
@@ -509,6 +585,21 @@ flowchart TD
   ([`ARCHITECTURE.md`](ARCHITECTURE.md) §1.2; `FR-89`). No data is fetched by client-side JS from an
   admin API — there is no public API at MVP ([`DATABASE.md`](DATABASE.md) §1.1 note on
   `personal_access_tokens`: "SiteSentinel … does not expose an API at MVP").
+
+**Implemented HTTP surface (Phase 8).** Four public routes share the same visibility gate:
+
+| Route | Method | Behaviour |
+| --- | --- | --- |
+| `/status` | `GET` (`status.show`) | HTML projection; locked password mode renders the password form with no data; private mode returns `404` when not an admin |
+| `/status.json` | `GET` (`status.json`) | Same projection as `dto->toArray()` (`banner`, `services`, `updatedDayBucket`); locked password mode returns `403 {"message":"Locked."}`; private mode returns `404` |
+| `/status/unlock` | `POST` (`status.unlock`) | Throttled (`throttle.status-unlock`); wrong password → uniform `422` (JSON) / redirect-back-with-errors (form) |
+| `/status/logout` | `POST` (`status.logout`) | Forgets the three unlock session keys; never logs out an admin session |
+
+`status.json` is **included** in the MVP surface (it renders the same redacted DTO); it is not a
+separate data source. Both HTML and JSON set `X-Robots-Tag: noindex, nofollow`; cache-control is
+`public, max-age=60` in `Public` mode and `no-store, private` otherwise. The visibility decision is
+made by `App\Http\Middleware\EnsureStatusVisibility` (applied to the status routes) and
+`App\Services\StatusPage\VisibilityGate`.
 
 ---
 
@@ -533,6 +624,18 @@ flowchart TD
   updates promptly rather than waiting out the TTL.
 - Cache store is Redis at MVP ([`ARCHITECTURE.md`](ARCHITECTURE.md) §12); the `cache` table exists
   only as a framework fallback and is not the primary store ([`DATABASE.md`](DATABASE.md) §3.21).
+
+**Implemented behaviour (Phase 8, `ADR-029`).** `StatusPageCache::remember()` caches the
+`PublicStatusDTO` under key `{cache_prefix}:{sha1(visibility_mode)}:{updated_at}` with
+`cache_prefix = status:projection:v1` and TTL
+`max(ttl_floor, min(published check_interval_seconds))`, `ttl_floor = 60 s`. The key contains no
+website/row identifier — only the mode hash and the settings stamp — so it cannot be enumerated.
+`StatusPageCache::bust()` is called **post-commit** (failure-isolated, never breaking the write) from
+`IncidentEngine`, `IncidentStateMachine::apply()`, and the admin settings save; it forgets the keys
+for all three modes at the current settings stamp. The admin save also advances
+`status_page_settings.updated_at`, which rolls the key forward and immediately retires the old
+projection. **Cache isolation:** only the redacted DTO is stored — no raw `websites`/`incidents`
+row can ever be read back out of the cache (§9.1).
 
 ### 9.3 Load considerations
 
@@ -564,6 +667,10 @@ flowchart TD
   `id`/class derived from `website_id`, rule id, or hash.
 - Do not expose a count of total monitored websites unless the admin explicitly publishes it; the
   count itself is reconnaissance.
+- **Implemented (Phase 8, `ADR-029`).** Each row's only identifier is a positional
+  `opaqueIndex` (`s-1`, `s-2`, …) assigned in display order; no `website_id`, DB key, host, or hash
+  is emitted in HTML, JSON, class names, or cache keys. **No service count is published** anywhere in
+  the HTML or JSON — the number of published services is not rendered.
 
 ### 10.3 `noindex` and robots policy
 
@@ -575,6 +682,10 @@ flowchart TD
   search results.
 - Combine a `robots.txt` disallow with the response header, and rely on the header as the
   authoritative control (robots.txt is advisory).
+- **Implemented (Phase 8).** Every status response (HTML, JSON, unlock form, locked/expired state)
+  carries `X-Robots-Tag: noindex, nofollow`, and the status Blade views also set
+  `<meta name="robots" content="noindex, nofollow">`. `public/robots.txt` disallows `/status` and
+  `/admin`.
 
 ### 10.4 No DDoS mitigation in-app
 
@@ -600,12 +711,26 @@ flowchart TD
 | Status-page password | `status_page_settings.password_hash` (hashed) |
 | Public slug | `status_page_settings.slug` (unique: `uq_status_page_settings_slug`) |
 | Branding (title/logo/footer/custom message) | `status_page_settings.branding` (JSON) |
-| Which websites are listed, and their display aliases | per-website inclusion + `websites.name` / alias (see §11.2) |
+| Which websites are listed, and their display aliases | `websites.is_visible_on_status` + `websites.status_alias` (see §11.2) |
 | Whether the page is shown at all | `visibility_mode = Private` (no public exposure) |
 
 All from [`DATABASE.md`](DATABASE.md) §3.18. Per [`DECISIONS.md`](DECISIONS.md) open questions, whether
 this stays a separate table or folds into `settings` is revisitable — this document does not change
 the frozen name `status_page_settings`.
+
+**Implemented per-website storage (Phase 8, `ADR-029`).** Per-website inclusion is the
+`websites.is_visible_on_status` boolean (default `0`) and the public display alias is
+`websites.status_alias` (nullable, `VARCHAR(255)`), not a separate join table. **The `slug` is
+storage-only:** it is validated (`max:191`, `alpha_dash`) and persisted on the singleton, but it is
+**not used for routing** — the page is always served at `/status` and `/status.json` — and it is not
+rendered. It exists for a future custom-path feature (`FR-84`, out of MVP scope).
+
+**Implemented confirmation UX (§11.3).** The admin form requires a `confirm_public` checkbox; the
+server-side `UpdateStatusPageSettingsRequest` rejects `visibility_mode = Public` without it
+(`'Going public requires explicit confirmation.'`). The mode change is audited as
+`status_page.visibility.changed` with `{from, to}` metadata. Saving any settings change advances
+`updated_at`, which invalidates the cached projection **and** every existing unlock session (§3.2,
+§9.2).
 
 ### 11.2 Per-website inclusion and aliasing
 
@@ -686,6 +811,84 @@ the frozen name `status_page_settings`.
 - **Enumeration test** — no `website_id`, rule id, or internal path appears in the response or in
   element/asset identifiers (§10.2).
 
+### 12.5 Implementation status (Phase 8)
+
+All of the above are implemented and covered by the `tests/Feature/StatusPage/*` suite (**94 tests**,
+all passing), which asserts observable HTML source and JSON bodies only:
+
+| Suite | Coverage |
+| --- | --- |
+| `RedactionRegressionTest` | §12.3 release blocker — canaries across every mode + unlock state (incl. rotated/expired session) |
+| `VisibilityGateTest` | §12.2 all three modes + admin/viewer/anonymous |
+| `PasswordGateTest` | §3.2–3.5 unlock, throttle (5/10 min), rotation revocation, uniform 422 |
+| `DerivationTest` | §5.3 derivation + label allowlist + banner worst-case + empty-set `Unknown` |
+| `StalenessTest` | §6.4 clock-controlled stale floor (300 s) |
+| `CacheTest` | §9.2 DTO-only cache, key shape, bust on incident change |
+| `StatusPageHttpTest` | §8.5 route surface, headers (`noindex`, cache-control), `status.json` |
+| `NoSsrfTest` | §10.1 no outbound fetch |
+| `EnumerationTest` | §10.2 no ids/paths/count |
+
+Full-suite verification at Phase 8 close: **329 tests, 324 passed, 5 pre-existing `sessions` env
+failures** (unchanged from the pre-Phase-8 baseline), zero regressions.
+
 ---
 
-*End of `STATUS-PAGE.md` — specification only; authoritative for status page presentation.*
+## 13. Operations — Troubleshooting the Status Page
+
+Concrete recovery steps for the failure modes an operator will actually meet. All commands run from
+the repository root.
+
+### 13.1 Unlock stops working / password rotation did not take
+
+The unlock stamp is `v1:{status_page_settings.updated_at}`. If the row's `updated_at` did not advance
+when the password changed (e.g. a manual SQL update), existing unlocks will not revoke and a new
+password may appear not to apply.
+
+- Inspect: `php artisan tinker --execute="dump(App\Models\StatusPageSetting::singleton()->only(['visibility_mode','updated_at']));"`
+- Fix: re-save through the admin form (`/admin/status-settings`), which advances `updated_at`, busts
+  the projection cache, and rotates every session stamp. A manual `UPDATE` that leaves `updated_at`
+  unchanged will **not** revoke sessions.
+
+### 13.2 Stale projection / incident change not reflected
+
+The projection is cached under `status:projection:v1:*`. Incident transitions bust it post-commit; a
+crash between commit and bust, or a manual DB edit, can leave a stale entry.
+
+- Flush just the projection keys:
+  - Redis: `redis-cli --scan --pattern 'status:projection:v1:*' | xargs -r redis-cli del`
+  - Or via Laravel: `php artisan tinker --execute="App\Services\StatusPage\StatusPageCache::bust();"`
+- The cache self-heals at the TTL (`max(60, shortest published check_interval_seconds)`).
+
+### 13.3 `/status` returns `404` instead of the login/password form
+
+This is expected and intentional: `Private` mode returns `404` to a non-admin so the page's existence
+is not advertised, and a `Password Protected` page with **no `password_hash`** also fails closed with
+`404` (never renders data). To distinguish the causes:
+
+- Confirm the mode: `php artisan tinker --execute="dump(App\Models\StatusPageSetting::singleton()->visibility_mode);"`
+- If `Private`: log in as an admin, or switch to `Public`/`Password Protected` via
+  `/admin/status-settings` (Public requires the `confirm_public` checkbox).
+- If `Password Protected` with no hash: set a password in the admin form. The request validator
+  refuses to save `Password Protected` without a hash.
+
+### 13.4 `429 Too many attempts` on unlock
+
+The unlock throttle is **5 attempts per 10 minutes** keyed on `status-unlock:{ip}:{sessionId}`. A
+legitimate user who exhausts it must wait out the window or obtain a fresh session cookie (the key
+includes the session id, so a new session has a new counter).
+
+- Inspect the key's remaining TTL (Redis): `redis-cli ttl 'status-unlock:<ip>:<sessionId>'`
+- Clear a single stuck key: `redis-cli del 'status-unlock:<ip>:<sessionId>'`
+- Clear all unlock counters (Redis): `redis-cli --scan --pattern 'status-unlock:*' | xargs -r redis-cli del`
+- The `429` response carries `Retry-After` (seconds), so clients can back off deterministically.
+
+### 13.5 Unlock returns `422 Incorrect password` (JSON) but the form just redisplays
+
+Both are the same rejection, by design (`ADR-028`): JSON clients receive a uniform `422` with zero
+data; browsers receive a `302` redirect back to the form with an error. No service data is rendered
+on a failed unlock in either case. Check the audit trail for `status_page.unlock.failed`
+(`reason = bad_password` vs `no_password_configured`).
+
+---
+
+*End of `STATUS-PAGE.md` — implemented in Phase 8; authoritative for status page presentation.*
