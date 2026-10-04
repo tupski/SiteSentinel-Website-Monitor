@@ -23,6 +23,7 @@
                 </nav>
             </div>
             <div class="flex items-center gap-4">
+                <a href="{{ route('admin.profile.edit') }}" class="text-sm text-text-muted hover:text-text">{{ __('Profile') }}</a>
                 <x-theme-switcher />
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf

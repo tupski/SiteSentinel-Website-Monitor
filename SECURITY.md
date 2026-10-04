@@ -756,8 +756,10 @@ full traceability; they carry no secret): `auth.admin_provisioned` (out-of-band 
 `auth.password_reset_failed` (reset token invalid/expired), `website.created` / `website.updated` /
 `website.deleted` / `website.toggled` (admin website CRUD), `website.check_queued` (manual run-check
 enqueued — no probe runs in the request path), `notification.channel_created` /
-`notification.channel_updated` / `notification.channel_deleted` (admin channel management), and
-`notification.channel_disabled` (circuit breaker — see [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §9).
+`notification.channel_updated` / `notification.channel_deleted` (admin channel management),
+`notification.channel_disabled` (circuit breaker — see [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §9),
+`auth.profile.updated` (an admin changed their own name/email), and `auth.password.changed`
+(an admin changed their own password via the profile — the value is never recorded).
 
 ### 9.2 Where events go, and the separation rule
 

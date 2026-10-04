@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Admin\IncidentController;
 use App\Http\Controllers\Admin\NotificationChannelController;
+use App\Http\Controllers\Admin\ProfileController;
 use App\Http\Controllers\Admin\PushSubscriptionController;
 use App\Http\Controllers\Admin\StatusPageController as AdminStatusPageController;
 use App\Http\Controllers\Admin\StatusPageSettingController;
@@ -81,6 +82,13 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
     Route::post('push/subscribe', [PushSubscriptionController::class, 'store'])->name('push.subscribe');
     Route::delete('push/unsubscribe', [PushSubscriptionController::class, 'destroy'])->name('push.unsubscribe');
     Route::post('push/test', [PushSubscriptionController::class, 'test'])->middleware('throttle:30,1')->name('push.test');
+
+    // Phase 5: admin profile (identity + password). Same auth + session + admin
+    // gate as every other admin route (AC-2-02). Passwords are verified and
+    // hashed server-side; the forms never re-render a password value.
+    Route::get('profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::put('profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::put('profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
 
     // Phase 11 (ADR-031): multi-page CRUD. Delete is guarded in the controller
     // (never the last/default page; websites fall back via ON DELETE SET NULL).

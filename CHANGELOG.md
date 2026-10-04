@@ -1,5 +1,50 @@
 # Changelog
 
+## [2026-10-04] — Admin profile page + password change (Phase 5)
+
+### Added
+
+- Admin-protected profile routes in the existing `auth` + `session.timeouts` + `admin`
+  group of [`routes/web.php`](routes/web.php): `GET admin/profile` (`admin.profile.edit`),
+  `PUT admin/profile` (`admin.profile.update`) and `PUT admin/profile/password`
+  (`admin.profile.password`). No new middleware or authorization was introduced.
+- [`app/Http/Controllers/Admin/ProfileController.php`](app/Http/Controllers/Admin/ProfileController.php)
+  with `edit` / `update` / `updatePassword`, acting only on the authenticated user (no
+  user id is ever accepted, so it is IDOR-safe by construction).
+- [`app/Http/Requests/UpdateProfileRequest.php`](app/Http/Requests/UpdateProfileRequest.php)
+  (explicit `name` + `email` whitelist, unique-email check ignoring the current user) and
+  [`app/Http/Requests/UpdatePasswordRequest.php`](app/Http/Requests/UpdatePasswordRequest.php)
+  (`current_password` + `confirmed` + `Password::min(max(12, sentinel.auth.min_password_length))`
+  + not-equal-to-current).
+- [`resources/views/admin/profile/edit.blade.php`](resources/views/admin/profile/edit.blade.php):
+  initials avatar header, "Profile Information" and "Change Password" cards built from
+  `x-ui.card` / `x-form.field` / `x-ui.input` / `x-ui.button` / `x-ui.alert`, semantic tokens
+  only (dark-mode correct), bound labels and `aria-describedby` error associations.
+- "Profile" link in the [`admin-layout`](resources/views/components/admin-layout.blade.php) header.
+- [`tests/Feature/Admin/ProfileTest.php`](tests/Feature/Admin/ProfileTest.php): guest redirect +
+  non-admin 403, page render, name/email update + validation, secure password change (hash
+  asserted), wrong/mismatched/short/same-as-current rejection, no-password-in-response, and
+  a role/active-state escalation guard.
+- Supplementary audit events `auth.profile.updated` / `auth.password.changed` (value never
+  recorded), documented in [`SECURITY.md`](SECURITY.md) §9.1.
+
+### Notes
+
+- **Email is editable.** `config/auth.php` uses the Eloquent/session `web` guard and the login
+  flow looks the identifier up by `email`; since the update is committed before the user is
+  serialized, changing your own email keeps the current session valid and simply changes the
+  address used for the next sign-in. Uniqueness is enforced ignoring the current user.
+- **Session handling:** the current session is kept valid after a password change (no
+  re-authentication requirement is documented for self-service changes). Session/security
+  middleware was **not** touched; the reset flow remains the only path that revokes sessions.
+- Passwords are hashed once via the User model's `hashed` cast; they are never logged, echoed
+  or returned in any response.
+
+### Verification
+
+- `vendor/bin/pint --dirty` green. `npm run build` green.
+- Full suite: **621 passed** (baseline 608 + 13 new).
+
 ## [2026-10-04] — Dark-mode: delete the legacy `html.dark` bridge (Phase 3d)
 
 ### Changed (presentation only — no route/controller/model/behaviour change)
