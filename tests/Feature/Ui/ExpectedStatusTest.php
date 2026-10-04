@@ -88,7 +88,11 @@ final class ExpectedStatusTest extends TestCase
         $response->assertOk();
 
         $html = (string) $response->getContent();
-        $this->assertStringContainsString('<select id="expected_status" name="expected_status"', $html);
+        // Rendered via x-ui.select, which emits the attributes before the tag
+        // close; assert the element and its id/name contract independently.
+        $this->assertStringContainsString('<select', $html);
+        $this->assertStringContainsString('id="expected_status"', $html);
+        $this->assertStringContainsString('name="expected_status"', $html);
         $this->assertStringContainsString('value="200"', $html);
         $this->assertStringContainsString('value="404"', $html);
         $this->assertStringContainsString('value="503"', $html);

@@ -19,6 +19,10 @@
         'outline' => 'border border-border-muted bg-transparent text-text hover:bg-surface-hover',
         'ghost' => 'bg-transparent text-text-muted hover:bg-surface-hover hover:text-text',
         'danger' => 'bg-danger text-danger-foreground hover:bg-danger-hover',
+        // Semantic filled actions (Phase 3a) — no `*-hover` token exists for these
+        // yet, so hover uses an opacity shift that is theme-agnostic.
+        'warning' => 'bg-warning text-warning-foreground hover:opacity-90',
+        'success' => 'bg-success text-success-foreground hover:opacity-90',
     ];
 
     $sizes = [

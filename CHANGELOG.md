@@ -1,5 +1,46 @@
 # Changelog
 
+## [2026-10-04] — Dark-mode token migration: dashboard, websites, incidents (Phase 3a)
+
+### Changed (presentation only — no route/controller/model/behaviour change)
+
+- Migrated five admin views off hardcoded light-only surfaces onto the Phase 2 semantic tokens
+  and shared primitives:
+  [`admin/dashboard.blade.php`](resources/views/admin/dashboard.blade.php),
+  [`admin/websites/index.blade.php`](resources/views/admin/websites/index.blade.php),
+  [`admin/websites/form.blade.php`](resources/views/admin/websites/form.blade.php),
+  [`admin/incidents/index.blade.php`](resources/views/admin/incidents/index.blade.php),
+  [`admin/incidents/show.blade.php`](resources/views/admin/incidents/show.blade.php).
+  `bg-white`/`bg-slate-*` → `bg-surface-elevated`/`bg-surface-muted`/`bg-surface-hover`;
+  `text-slate-*` → `text-text`/`text-text-muted`/`text-text-subtle`;
+  `border-slate-*` → `border-border`/`border-border-muted`.
+- Adopted `x-ui.table` (+ `table-head`/`table-body`/`table-empty`) for every table, so each table
+  now renders its `overflow-x-auto` container; `x-ui.button` for every action (primary/secondary/
+  outline/ghost/danger, `iconOnly` + `aria-label` for icon-only row actions); `x-ui.badge` for the
+  dashboard health/status pills; `x-ui.alert` for flash + validation summaries; and `x-ui.input`/
+  `select`/`textarea`/`checkbox` for all form controls (inside the existing `x-form.field` wrappers).
+- [`ui/button.blade.php`](resources/views/components/ui/button.blade.php): added additive `success`
+  and `warning` variants (token-based) so the incident Acknowledge (amber) / Resolve (green) actions
+  keep their original colour intent. Existing variants/sizes unchanged.
+
+### Notes
+
+- The legacy `html.dark` bridge in `app.css` is intentionally left in place (Phase 3d removes it once
+  all views are migrated); removing it now would regress the unmigrated views.
+- The `x-admin-layout` shell and `theme-switcher` are out of this phase's scope and keep their own
+  `dark:` utilities for now.
+- No new dependency, no renamed component, no markup/`wire:`/Alpine/`@csrf`/route contract changed.
+
+### Tests
+
+- Added [`AdminDarkModeMigrationTest`](tests/Feature/Ui/AdminDarkModeMigrationTest.php) (6 tests):
+  the dashboard/websites/incidents views render the token surfaces, the `overflow-x-auto` table
+  container and the alert primitive, and no longer contain their old light-only card/table/control
+  markers. Asserts semantic tokens, never full class strings.
+- Updated [`ExpectedStatusTest`](tests/Feature/Ui/ExpectedStatusTest.php): the status `<select>` is
+  now rendered via `x-ui.select` (attributes emitted before the tag close), so the single
+  raw-substring assertion was split into equivalent `id=`/`name=`/`<select` checks — same coverage.
+
 ## [2026-10-04] — Shared UI primitives + semantic theme tokens (ADR-033 / ADR-034, Phase 2)
 
 ### Added (UI layer — no architecture, route or controller change)
