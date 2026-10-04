@@ -593,10 +593,26 @@ flowchart TD
 
 ### 14.3 Shared UI primitives
 
-- `x-form.field` — label + help icon with hover tooltip **and** click modal + error + hint.
-- `x-modal` — Alpine-based; used by delete confirm, help, and bulk actions.
-- `x-per-page` selector — 10 / 20 / 50 / 100 / All, preserving the query string, backed by a shared
-  controller-side validated per-page whitelist helper.
+All primitives consume the semantic token layer (`:root` / `.dark` / `@theme inline` in
+`resources/css/app.css`) and therefore need **no** `dark:`-duplicated colours — one source of truth,
+correct in both themes (ADR-033).
+
+- **Shell** — `x-admin-layout` (collapsible sidebar + top bar + `<main>`, ADR-036), `x-admin-sidebar`
+  (grouped nav from real named routes, shared by the desktop rail and the mobile drawer),
+  `x-theme-switcher` (icon-only Light/Dark/System dropdown, ADR-033) and `x-profile-dropdown`
+  (initials avatar → identity + links + real POST logout).
+- **Structure** — `x-ui.card` (header/actions/body), `x-ui.table` (+ `x-ui.table-head` /
+  `x-ui.table-body` / `x-ui.table-empty`, each table rendering its own `overflow-x-auto` container so
+  wide tables never push the page into horizontal overflow), and the dark-safe pagination override at
+  `resources/views/vendor/pagination/tailwind.blade.php`.
+- **Controls** — `x-ui.button` (primary / secondary / outline / ghost / danger / success / warning,
+  `iconOnly` + `aria-label` for icon-only actions), `x-ui.input`, `x-ui.select`, `x-ui.textarea`,
+  `x-ui.checkbox`, `x-ui.radio`, and `x-form.field` (label + help icon with hover tooltip **and** click
+  modal + error + hint).
+- **Feedback** — `x-ui.alert`, `x-ui.badge`, `x-ui.empty-state`, `x-ui.skeleton`, `x-modal`
+  (Alpine-based; delete confirm, help, bulk actions), and the `x-per-page` selector (10 / 20 / 50 / 100
+  / All, preserving the query string, backed by a shared controller-side validated per-page whitelist
+  helper).
 - Icon-button convention for row actions with accessible `aria-label`; **delete is always gated by a
   confirmation modal**.
 

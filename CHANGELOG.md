@@ -1,5 +1,28 @@
 # Changelog
 
+## [2026-10-04] — Final verification pass (Phase 7)
+
+### Fixed
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) §14.3 "Shared UI primitives" was stale: it listed only the
+  Phase 8 set (`x-form.field`, `x-modal`, `x-per-page`) and omitted the Phase 2/3 token-based `x-ui.*`
+  component family (`card`, `button`, `badge`, `alert`, `table` + head/body/empty, `input`, `select`,
+  `textarea`, `checkbox`, `radio`, `skeleton`, `empty-state`), the shell components (`x-admin-sidebar`,
+  `x-theme-switcher`, `x-profile-dropdown`) and the dark-safe pagination override. Rewritten to the
+  actual inventory.
+
+### Verification
+
+- Full gate re-run green: `php artisan test` **667 passed** (4064 assertions); `php vendor/bin/pint
+  --test` clean (231 files); `npm run build` succeeds.
+- `php artisan migrate:fresh --seed` succeeds; a second `php artisan db:seed` is idempotent (settings
+  2, status_pages 1, detection_rules 36 — unchanged, no clobber).
+- No route removed or renamed; only additive route names. No `app/Services`, `app/Jobs` or `app/Console`
+  business-logic file changed by the UI work (the only service added is the new `SettingsRepository`).
+- Live browser pass (Playwright): theme Light/Dark/System, collapsed sidebar + persistence across
+  reload, mobile drawer at 390 px with **no horizontal overflow**, profile dropdown, settings and
+  documentation pages — all in both themes.
+
 ## [2026-10-04] — Collapsible sidebar shell + top bar + profile dropdown (Phase 4)
 
 ### Changed
