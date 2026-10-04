@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\StatusPage;
 
 use App\Models\Incident;
-use App\Models\StatusPageSetting;
+use App\Models\StatusPage;
 use App\Models\User;
 use App\Models\Website;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -14,7 +14,7 @@ use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * Shared helpers for the Phase 8 status-page test suite (STATUS-PAGE.md §12).
+ * Shared helpers for the status-page test suite (STATUS-PAGE.md §12, ADR-031).
  *
  * These tests assert observable response bodies (HTML source + JSON) only.
  * Where the cache is inspected it is through the public StatusPageCache API,
@@ -54,6 +54,45 @@ abstract class StatusPageTestCase extends TestCase
     }
 
     private static int $hostSeq = 0;
+
+    private static int $slugSeq = 0;
+
+    /**
+     * Create (or fetch) the default status page.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    protected function defaultPage(array $overrides = []): StatusPage
+    {
+        return StatusPage::query()->firstOrCreate(
+            ['slug' => StatusPage::DEFAULT_SLUG],
+            array_merge([
+                'name' => 'Default page',
+                'is_default' => true,
+                'visibility_mode' => StatusPage::MODE_PRIVATE,
+                'password_hash' => null,
+            ], $overrides)
+        );
+    }
+
+    /**
+     * Create a non-default status page.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    protected function makePage(array $overrides = []): StatusPage
+    {
+        self::$slugSeq++;
+        $slug = $overrides['slug'] ?? 'page-'.self::$slugSeq;
+
+        return StatusPage::query()->create(array_merge([
+            'name' => 'Page '.self::$slugSeq,
+            'slug' => $slug,
+            'is_default' => false,
+            'visibility_mode' => StatusPage::MODE_PRIVATE,
+            'password_hash' => null,
+        ], $overrides));
+    }
 
     /**
      * @param  array<string, mixed>  $overrides
@@ -96,11 +135,13 @@ abstract class StatusPageTestCase extends TestCase
     }
 
     /**
+     * Set the default page's visibility mode.
+     *
      * @param  array<string, mixed>  $attributes
      */
-    protected function setMode(string $mode, array $attributes = []): StatusPageSetting
+    protected function setMode(string $mode, array $attributes = []): StatusPage
     {
-        $settings = StatusPageSetting::singleton();
+        $settings = $this->defaultPage();
         $settings->visibility_mode = $mode;
 
         foreach ($attributes as $key => $value) {
@@ -110,6 +151,24 @@ abstract class StatusPageTestCase extends TestCase
         $settings->save();
 
         return $settings->refresh();
+    }
+
+    /**
+     * Set a specific page's visibility mode.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    protected function setPageMode(StatusPage $page, string $mode, array $attributes = []): StatusPage
+    {
+        $page->visibility_mode = $mode;
+
+        foreach ($attributes as $key => $value) {
+            $page->{$key} = $value;
+        }
+
+        $page->save();
+
+        return $page->refresh();
     }
 
     /**
@@ -127,12 +186,11 @@ abstract class StatusPageTestCase extends TestCase
     }
 
     /**
-     * Perform the real unlock POST and carry the resulting session cookie so
-     * subsequent requests share the unlocked session.
+     * Perform the real unlock POST for the default page and carry the session.
      */
     protected function unlockWith(string $password): TestResponse
     {
-        $response = $this->post(route('status.unlock'), ['password' => $password]);
+        $response = $this->post(route('status.unlock', ['statusPage' => $this->defaultPage()->slug]), ['password' => $password]);
         $this->forwardSessionCookie($response);
 
         return $response;
@@ -141,9 +199,10 @@ abstract class StatusPageTestCase extends TestCase
     /**
      * @return array<int, array<string, mixed>>
      */
-    protected function servicesJson(): array
+    protected function servicesJson(?StatusPage $page = null): array
     {
-        $response = $this->getJson(route('status.json'));
+        $page ??= $this->defaultPage();
+        $response = $this->getJson(route('status.json', ['statusPage' => $page->slug]));
         $response->assertOk();
 
         /** @var array<int, array<string, mixed>> $services */
@@ -152,9 +211,9 @@ abstract class StatusPageTestCase extends TestCase
         return $services;
     }
 
-    protected function labelFor(string $alias): ?string
+    protected function labelFor(string $alias, ?StatusPage $page = null): ?string
     {
-        foreach ($this->servicesJson() as $service) {
+        foreach ($this->servicesJson($page) as $service) {
             if (($service['displayName'] ?? null) === $alias) {
                 return $service['publicLabel'] ?? null;
             }

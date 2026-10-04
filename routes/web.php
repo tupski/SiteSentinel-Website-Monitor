@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Admin\IncidentController;
 use App\Http\Controllers\Admin\NotificationChannelController;
+use App\Http\Controllers\Admin\PushSubscriptionController;
+use App\Http\Controllers\Admin\StatusPageController as AdminStatusPageController;
 use App\Http\Controllers\Admin\StatusPageSettingController;
 use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\AdminDashboardController;
@@ -43,16 +45,28 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
     Route::resource('websites', WebsiteController::class)->except(['show']);
     Route::post('websites/{website}/toggle', [WebsiteController::class, 'toggle'])->name('websites.toggle');
 
+    // Plan S2: manual "run check" (queues only — never an inline probe) + bulk actions.
+    // FR-24: the manual trigger is rate-limited (30/min per admin). Bulk routes use
+    // fixed paths so `websites/bulk` can never be read as a {website} id.
+    Route::post('websites/{website}/check', [WebsiteController::class, 'runCheck'])->middleware('throttle:30,1')->name('websites.check');
+    Route::post('websites/bulk/enable', [WebsiteController::class, 'bulkEnable'])->name('websites.bulk.enable');
+    Route::post('websites/bulk/disable', [WebsiteController::class, 'bulkDisable'])->name('websites.bulk.disable');
+    Route::post('websites/bulk/delete', [WebsiteController::class, 'bulkDelete'])->name('websites.bulk.delete');
+
     // Phase 6: incident lifecycle
     Route::get('incidents', [IncidentController::class, 'index'])->name('incidents.index');
     Route::get('incidents/{incident}', [IncidentController::class, 'show'])->name('incidents.show');
     Route::post('incidents/{incident}/acknowledge', [IncidentController::class, 'acknowledge'])->name('incidents.acknowledge');
     Route::post('incidents/{incident}/resolve', [IncidentController::class, 'resolve'])->name('incidents.resolve');
 
-    // Phase 7: notification channels + delivery logs (admin only, CSRF via web group).
+    // Phase 7 / Plan S3: notification channels + delivery logs (admin only, CSRF via web group).
     Route::get('notifications', [NotificationChannelController::class, 'index'])->name('notifications.index');
     Route::get('notifications/create', [NotificationChannelController::class, 'create'])->name('notifications.create');
     Route::post('notifications', [NotificationChannelController::class, 'store'])->name('notifications.store');
+    // Test-before-save: posts an unsaved channel config, sends via the provider
+    // registry, and never persists a channel. Fixed path so it can never be read
+    // as a {channel} id. Rate-limited + CSRF-protected (AGENTS.md §12).
+    Route::post('notifications/test', [NotificationChannelController::class, 'test'])->middleware('throttle:30,1')->name('notifications.test');
     Route::get('notifications/{channel}/edit', [NotificationChannelController::class, 'edit'])->name('notifications.edit');
     Route::put('notifications/{channel}', [NotificationChannelController::class, 'update'])->name('notifications.update');
     Route::delete('notifications/{channel}', [NotificationChannelController::class, 'destroy'])->name('notifications.destroy');
@@ -60,12 +74,32 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
 
     Route::get('notification-logs', [NotificationChannelController::class, 'logs'])->name('notification-logs.index');
 
+    // Phase 11 (ADR-032): Browser Push subscription lifecycle + test-send.
+    // Auth + admin + session timeouts + CSRF via the group; `test` is
+    // rate-limited. The VAPID private key and subscription material are never
+    // echoed (SECURITY.md §4).
+    Route::post('push/subscribe', [PushSubscriptionController::class, 'store'])->name('push.subscribe');
+    Route::delete('push/unsubscribe', [PushSubscriptionController::class, 'destroy'])->name('push.unsubscribe');
+    Route::post('push/test', [PushSubscriptionController::class, 'test'])->middleware('throttle:30,1')->name('push.test');
+
+    // Phase 11 (ADR-031): multi-page CRUD. Delete is guarded in the controller
+    // (never the last/default page; websites fall back via ON DELETE SET NULL).
+    Route::resource('status-pages', AdminStatusPageController::class)->except(['show']);
+
+    // Legacy Phase 8 singleton settings — retained for one release (DATABASE.md
+    // §3.18). Editing still writes through to the default page.
     Route::get('status-settings', [StatusPageSettingController::class, 'edit'])->name('status-settings.edit');
     Route::put('status-settings', [StatusPageSettingController::class, 'update'])->name('status-settings.update');
 });
 
-// Public status page (Phase 8). Same gate for HTML + JSON.
-Route::get('/status', [StatusPageController::class, 'show'])->name('status.show');
-Route::get('/status.json', [StatusPageController::class, 'json'])->name('status.json');
-Route::post('/status/unlock', [StatusPageController::class, 'unlock'])->middleware('throttle.status-unlock')->name('status.unlock');
-Route::post('/status/logout', [StatusPageController::class, 'logout'])->name('status.logout');
+// Public status pages (Phase 8 → Phase 11, ADR-031). Same gate for HTML + JSON.
+// The page is route-model-bound by its unique slug; the legacy slugless
+// `/status` 302-redirects to the default page.
+Route::get('/status', [StatusPageController::class, 'legacy'])->name('status.legacy');
+Route::get('/status.json', [StatusPageController::class, 'jsonLegacy'])->name('status.json-legacy');
+// Register the `.json` variant before the bare-slug route so the literal
+// suffix wins over a greedy `{statusPage}` match.
+Route::get('/status/{statusPage}.json', [StatusPageController::class, 'json'])->name('status.json');
+Route::get('/status/{statusPage}', [StatusPageController::class, 'show'])->name('status.show');
+Route::post('/status/{statusPage}/unlock', [StatusPageController::class, 'unlock'])->middleware('throttle.status-unlock')->name('status.unlock');
+Route::post('/status/{statusPage}/logout', [StatusPageController::class, 'logout'])->name('status.logout');

@@ -1,5 +1,288 @@
 # Changelog
 
+## [2026-10-04] — Fix Alpine console errors in the reusable modal (ADR-034)
+
+### Fixed (bug — no architecture change)
+
+- **`x-modal` broke Alpine with `Invalid or unexpected token` / `Illegal invocation`.** The
+  component's inline `x-data="{…}"` object embedded a focusable-element CSS selector containing
+  double quotes (`[tabindex]:not([tabindex="-1"])`). Because `x-data` is delimited with double
+  quotes in Blade/HTML, the inner quotes terminated the attribute early, so Alpine received a
+  syntactically broken expression and the object never initialised. The subsequent `x-show="open"`
+  bindings then resolved the bare identifier `open` in global scope — where `window.open` is a
+  function — producing `Illegal invocation` on the bulk-delete-websites modal.
+- **Fix:** the modal component is now defined once in
+  [`resources/js/app.js`](resources/js/app.js) as `Alpine.data('modal', …)` (registered before
+  `Alpine.start()`, alongside the existing `theme`/`pushOptin` definitions). The focus selector now
+  lives in a plain JS string with no HTML-attribute quoting conflict, and the previously mangled
+  `focus="==" 'function'` / `nodes.length===0` fragments are restored to their intended logic
+  (`typeof this.previousFocus.focus === 'function'`, `if (nodes.length === 0) return;`,
+  shift-tab wrap handling). [`resources/views/components/modal.blade.php`](resources/views/components/modal.blade.php)
+  now uses `x-data="modal"`.
+- **Unchanged:** all accessibility attributes (`role="dialog"`, `aria-modal="true"`,
+  `aria-labelledby`), `x-show`, `x-transition`, `x-cloak`, `x-ref="panel"`, backdrop click-to-close,
+  Escape-to-close and the Tab focus trap behave exactly as before. [`modal-form.blade.php`](resources/views/components/modal-form.blade.php)
+  delegates to `x-modal` and needed no change; no other view uses the embedded-quote selector
+  pattern. No new dependency, no forbidden tech introduced.
+
+### Tests
+
+- Extended [`SharedComponentsTest`](tests/Feature/Ui/SharedComponentsTest.php) with a regression
+  guard asserting the rendered modal contains `x-data="modal"`, preserves the focus-trap/a11y
+  wiring, and does NOT embed the focusable-element selector or inline component body.
+
+## [2026-10-04] — Verification pass: full-suite + anti-regression audit
+
+### Docs (status-labelling reconciliation — no code change)
+
+- Corrected stale `planned, not implemented` / `Future` labels for shipped Phase 11 work (AGENTS.md
+  §14/§17). `NOTIFICATIONS.md` §7.3 Browser Push is now labelled `Implemented` (§7 header notes
+  WhatsApp/Webhook remain `Future`); `ARCHITECTURE.md` §10 notification-flow node and §14 header now
+  read implemented; `PLAN.md` Phase 11 header/AC-25..AC-31 and `DECISIONS.md` ADR-031..ADR-034 status
+  lines now read implemented. No behaviour, schema, or route changed.
+- Audit result: full suite 565 passed / 3479 assertions; Pint clean (211 files);
+  `migrate:fresh --seed` + second `db:seed` idempotent; `npm run build` OK with the Tailwind v4
+  `dark` variant present. All nine §15 invariants proven by existing tests; no regression found.
+
+## [2026-10-04] — Browser Push notifications (Plan S5, ADR-032)
+
+### Added (implementation — Web Push)
+
+- **`push_subscriptions` table** (DATABASE.md §3.23). Additive migration with `user_id`/`website_id`
+  nullable FKs (cascade), `endpoint`/`p256dh`/`auth` stored encrypted, a deterministic
+  `endpoint_hash` (SHA-256) backing `uq_push_subscriptions_endpoint_hash`, and
+  `idx_push_subscriptions_enabled`. `notification_channels.type` validated enum extended with
+  `browser_push` (MySQL `ALTER … MODIFY`; SQLite dev/test rebuild via `change()`).
+  ([`0001_11_04_000000_create_push_subscriptions_table.php`](database/migrations/0001_11_04_000000_create_push_subscriptions_table.php),
+  [`0001_11_05_000000_add_browser_push_to_notification_channels_type.php`](database/migrations/0001_11_05_000000_add_browser_push_to_notification_channels_type.php))
+- **`PushSubscription` model** — encrypted casts on `endpoint`/`p256dh`/`auth`, all three in `$hidden`
+  (never serialized to a browser). ([`app/Models/PushSubscription.php`](app/Models/PushSubscription.php))
+- **`WebPushProvider`** implementing the SAME [`NotificationProvider`](app/Contracts/NotificationProvider.php)
+  contract as Email/Telegram; registered in
+  [`NotificationProviderRegistry`](app/Services/Notifications/NotificationProviderRegistry.php) as
+  `browser_push`. The `IncidentEngine` and `NotificationDispatcher` are unchanged — no push special-case.
+  Payloads are redacted through `MessageRedactor`; expired subscriptions (404/410) are disabled; a
+  failing push returns a `DeliveryResult` and never fails a monitoring job. Dependency:
+  `minishlink/web-push ^11.0` (PHP 8.4-compatible). ([`app/Services/Notifications/Channels/WebPushProvider.php`](app/Services/Notifications/Channels/WebPushProvider.php))
+- **VAPID config** via `config/sentinel.php` `push` + env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT`); `.env.example` updated. The private key is never logged and never placed in a
+  payload; only the public key is exposed to the opt-in JS.
+- **Service worker** [`public/sw.js`](public/sw.js) handling `push` + `notificationclick`; opt-in /
+  unsubscribe flow in [`resources/js/app.js`](resources/js/app.js) (register SW, request permission,
+  `pushManager.subscribe` with the VAPID public key, POST/DELETE the subscription).
+- **UI** on the Notification page: an opt-in toggle + modal-gated **Send test push** using the S1
+  components (`x-form.field`, `x-modal`). ([`resources/views/admin/notifications/channels/_push.blade.php`](resources/views/admin/notifications/channels/_push.blade.php))
+- **Routes** (auth + admin + session timeouts + CSRF): `POST /admin/push/subscribe`,
+  `DELETE /admin/push/unsubscribe`, `POST /admin/push/test` (throttled 30/min).
+  ([`app/Http/Controllers/Admin/PushSubscriptionController.php`](app/Http/Controllers/Admin/PushSubscriptionController.php))
+
+### Tests
+
+- New `WebPushProviderTest` (registry resolution, ok/failure classification, expired-disablement, VAPID
+  gating, no-secret-in-payload, at-rest encryption via an injected transport — no real network) and
+  `PushSubscriptionLifecycleTest` (auth + validation + no-secret-echo on subscribe/unsubscribe).
+- Extended `ProviderContractTest` (browser_push resolves), `SuppressionCooldownTest` (cooldown applies
+  to push), `QueueFailureIsolationTest` (failing push never fails a check), `SecretsRedactionTest`
+  (redactor scrubs push material + VAPID private key; subscription secrets encrypted/hidden), and
+  `CsrfSessionTest` (push routes are state-changing).
+
+## [2026-10-04] — Multiple status pages (Plan S4, ADR-031)
+
+### Added (implementation — multi-page status)
+
+- **`status_pages` table + `websites.status_page_id` FK.** Additive, data-preserving migration:
+  the legacy singleton `status_page_settings` row is migrated into one **default** page; the legacy
+  table is retained for one release (DATABASE.md §3.18, §3.22).
+  ([`0001_11_01_000000_create_status_pages_table.php`](database/migrations/0001_11_01_000000_create_status_pages_table.php),
+  [`0001_11_02_000000_add_status_page_id_to_websites_table.php`](database/migrations/0001_11_02_000000_add_status_page_id_to_websites_table.php),
+  [`0001_11_03_000000_migrate_status_page_settings_to_status_pages.php`](database/migrations/0001_11_03_000000_migrate_status_page_settings_to_status_pages.php))
+- **`StatusPage` model** + `Website::statusPage()` / `effectiveStatusPage()` resolver; `StatusPageSetting`
+  marked `@deprecated`. [Idempotent `StatusPageSeeder`](database/seeders/StatusPageSeeder.php) upserts
+  the default page by `slug`.
+- **Per-page public routing**: `GET /status/{slug}`, `GET /status/{slug}.json`,
+  `POST /status/{slug}/unlock`, `POST /status/{slug}/logout`; legacy `GET /status` (and `/status.json`)
+  `302`-redirect to the default page, or `404` when none exists.
+- **Per-page isolation invariants**: `StatusProjector` projects a SINGLE page's websites (NULL
+  assignment belongs to the default page only); `StatusPageCache` keys include page id + slug with a
+  global epoch bump for invalidation; unlock session key is `status_unlock.{page_id}`.
+- **Admin CRUD** at `/admin/status-pages` (`index`/`create`/`store`/`edit`/`update`/`destroy`) behind
+  auth+admin; delete is refused for the default/last page and releases websites via `ON DELETE SET
+  NULL`. Website assignment from the page form; a `status_page` select can also be added on the
+  website form. Views use the S1 components (`x-form.field` help, `x-modal` delete confirm,
+  `x-per-page` index, password eye toggle). Legacy `admin.status-settings` now edits the default page.
+
+### Tests
+
+- StatusPage suite migrated to the multi-page model and extended: per-page isolation, per-page unlock
+  session isolation, per-page cache keys, legacy `/status` redirect, slug routing, admin CRUD
+  auth/IDOR + delete safety, and RedactionRegressionTest across all visibility modes for each page.
+
+## [2026-10-04] — Notification settings simplification + test-before-save (Plan S3)
+
+### Changed (implementation — notification admin UI)
+
+- **Page renamed “Channels” → “Notification”.** The notification index `<title>`, `<h1>`, and the
+  admin top-nav label now read **Notification**; route names/URIs are unchanged. The delivery log
+  stays a separate top-nav entry. ([`channels/index.blade.php`](resources/views/admin/notifications/channels/index.blade.php),
+  [`admin-layout.blade.php`](resources/views/components/admin-layout.blade.php))
+- **Type-conditional add/edit form.** The channel form is now Alpine-driven: selecting `email` or
+  `telegram` reveals only that type's settings, and inactive inputs are `disabled` so an irrelevant
+  field is never submitted. All fields use the S1 `x-form.field` component, so required/optional is
+  explicit via the label asterisk and the `?` help tooltip/modal.
+  ([`channels/form.blade.php`](resources/views/admin/notifications/channels/form.blade.php))
+- **Type-aware, fail-closed validation.** Config rules moved into a shared
+  [`ValidatesChannelConfig`](app/Http/Requests/Concerns/ValidatesChannelConfig.php) trait used by
+  store/update/test. Email-only fields are `prohibited_if:type,telegram` and Telegram-only fields
+  are `prohibited_if:type,email`, so a tampered submission carrying the wrong type's fields is
+  rejected server-side (and required fields remain `required_if` the matching type).
+  ([`StoreNotificationChannelRequest`](app/Http/Requests/StoreNotificationChannelRequest.php),
+  [`UpdateNotificationChannelRequest`](app/Http/Requests/UpdateNotificationChannelRequest.php))
+
+### Added (implementation)
+
+- **Test-before-save.** `POST /admin/notifications/test` (`admin.notifications.test`) accepts an
+  **unsaved** channel config, validates it type-aware, and sends a `channel.test` payload through
+  the **provider registry** — identical escaping/truncation/transport as real sends — **without
+  persisting a channel**. Bound by `throttle:30,1`, CSRF-protected, admin+auth only (fixed `test`
+  path segment so it can never be read as a `{channel}` id). Returns Turbo-friendly JSON when the
+  request expects JSON, otherwise back with a flash; provider errors are classified and
+  secret-redacted. A `notification_logs` row records the attempt (`channel_id` null). “Send test”
+  button added to the create/edit form alongside the existing per-row test-send.
+  ([`NotificationChannelController::test`](app/Http/Controllers/Admin/NotificationChannelController.php),
+  [`TestNotificationChannelRequest`](app/Http/Requests/TestNotificationChannelRequest.php),
+  [`NotificationProviderRegistry::classFor`](app/Services/Notifications/NotificationProviderRegistry.php))
+- **Changelog + tests.** [`NotificationChannelUiTest`](tests/Feature/Notifications/NotificationChannelUiTest.php)
+  (15 tests): heading reads “Notification”; conditional fields render; store rejects wrong-type /
+  missing required fields; test action dispatches via a registry-bound provider spy, never persists,
+  leaks no secret, is rate-limited, and enforces auth + admin. `CsrfSessionTest` pins the new route
+  as state-changing. No migration required (channel type set unchanged; browser push is S5).
+
+## [2026-10-04] — Websites table actions + bulk operations (Plan S2)
+
+### Added (implementation — `ADR-034`, PRD `FR-103`/`FR-107`)
+
+- **Manual "run check".** Row action on the websites index plus `POST /admin/websites/{website}/check`
+  ([`WebsiteController::runCheck`](app/Http/Controllers/Admin/WebsiteController.php)). The action
+  **only dispatches** [`RunWebsiteCheck`](app/Jobs/RunWebsiteCheck.php) to the monitoring queue —
+  no probe runs in the request path (AGENTS.md §9); overlapping checks stay protected by the job's
+  per-website lock. Rate-limited (`FR-24`, 30/min). Flash confirmation; job internals are not
+  exposed. Audited as `website.check_queued`.
+- **Icon-only row actions.** Edit / Disable-Enable / Delete (plus Run check) are inline-SVG icon
+  buttons with `aria-label` + `title` (ADR-034 / PRD `FR-107`).
+- **Bulk actions + selection.** Row checkboxes and a select-all header checkbox (with indeterminate
+  state) drive an Alpine bulk bar (Enable, Disable, Delete) that appears when ≥1 row is selected.
+  Destructive bulk delete is modal-gated. New routes `POST /admin/websites/bulk/enable|disable|delete`
+  (fixed `bulk` path segment so it can never be read as a `{website}` id), validated by
+  [`BulkWebsiteActionRequest`](app/Http/Requests/BulkWebsiteActionRequest.php) (bounded id array,
+  integer members). Bulk delete soft-deletes `websites`, so no FK is orphaned and append-only
+  incident history is preserved (DATABASE.md §7).
+- **`x-modal-form`.** Confirmation variant of `x-modal` that wraps its body in a real
+  POST/PUT/DELETE form, so a delete can never submit without the modal being open.
+
+### Tests (implementation — `tests/Feature/Admin/WebsiteActionsTest.php`)
+
+- Run-check enqueues `RunWebsiteCheck` exactly once (`Queue::fake`) and performs **no** HTTP probe
+  (`Http::assertNothingSent()`).
+- Bulk enable/disable affect only selected rows; idempotent; safe on empty/unknown/soft-deleted
+  selections; bulk delete removes only selected rows and keeps incident history.
+- Icon actions carry accessible labels and delete is modal-gated; unauthenticated + non-admin + IDOR
+  selections are rejected. `CsrfSessionTest` now pins the four new routes as state-changing.
+
+### Docs
+
+- `SECURITY.md` §9.1 — `website.check_queued` recorded as a supplementary audit event.
+- `DECISIONS.md` `ADR-034` — amendment documenting `x-modal-form`, icon actions, and the bulk shape.
+- No migration required (soft delete + existing columns only). `PLAN.md` Phase 11 already owns
+  `FR-103`/`FR-107` and the icon-button convention; no phase change needed.
+
+---
+
+## [2026-10-04] — Shared UI primitives, theme, per-page selector, small form UX (S1)
+
+### Added (implementation — Phase 11 foundations, `ADR-033`, `ADR-034`)
+
+- **Theme Light / Dark / System (`ADR-033`).** Tailwind v4 class-based dark variant
+  (`@custom-variant dark` in [`resources/css/app.css`](resources/css/app.css)) plus semantic surface
+  tokens and baseline dark adaption for existing admin surfaces. `x-theme-switcher` three-state
+  control added to the admin header and login/unlock pages. An Alpine `theme` store in
+  [`resources/js/app.js`](resources/js/app.js) persists the preference to **localStorage AND a
+  cookie** and follows `prefers-color-scheme` for "System". A **no-FOUC inline bootstrap** partial
+  ([`resources/views/partials/theme-bootstrap.blade.php`](resources/views/partials/theme-bootstrap.blade.php))
+  is included in the `<head>` of `admin-layout`, `app-layout`, `layouts/app`, and the status unlock page.
+- **Shared UI primitives (`ADR-034`).** `x-form.field` (label + hover tooltip + click help modal +
+  hint + error, accessible `aria-describedby` and focusable help button, built-in password eye
+  toggle), `x-modal` (Alpine, focus-trap, Escape/backdrop close), `x-per-page` (10/20/50/100/All,
+  preserves the query string).
+- **Server-side per-page helper.** [`app/Support/PerPage.php`](app/Support/PerPage.php) validates
+  `per_page` against the whitelist `10,20,50,100,all` (default `20`), never trusting raw input;
+  "All" resolves to an unpaginated row count. Wired into the incidents, delivery-log, and websites
+  index listings (websites index is now paginated).
+- **Canonical expected-status catalogue.** [`app/Support/HttpStatusCodes.php`](app/Support/HttpStatusCodes.php)
+  is the authoritative allowed set; the websites form renders a `<select>` and the
+  [`WebsiteRequest`](app/Http/Requests/WebsiteRequest.php) rule is tightened to `in:` that set. The
+  `websites.expected_status` column is unchanged.
+- **Field help on every field** in login, status unlock, website form, and status-settings form, with
+  hint text and longer help (validation constraints, security notes, expected values).
+- **Modal-gated delete** on the websites index (replaces native `confirm()`).
+
+### Tests (implementation — `tests/Feature/Ui/`)
+
+- `PerPageHelperTest` — whitelist accepts/rejects and defaults; `PerPageListingTest` — valid/invalid
+  per_page, "All", and filter preservation across the three listings; `ExpectedStatusTest` — every
+  allowed code accepted, disallowed rejected, select rendered; `SharedComponentsTest` — components
+  render, field surfaces validation errors, password eye toggle, theme bootstrap present.
+
+### Notes
+
+- No migration: `websites.expected_status` semantics unchanged.
+- No forbidden technology introduced (Alpine only for local UI state). `/admin` remains behind
+  auth+admin; no registration route added.
+- Planning docs (`DECISIONS.md` `ADR-033`/`ADR-034`, `PRD.md`, `ARCHITECTURE.md`) were already updated
+  ahead of this work; no deviation required.
+
+---
+
+## [2026-10-04] — Documentation-first design: Multiple Status Pages, Browser Push, Theme, Shared UI
+
+### Added (documentation — Phase 11 design, `ADR-031`–`ADR-034`)
+
+> **Documentation only.** These entries record the **design and upcoming feature set**; no
+> application code exists for them. They are the contract the implementing agent builds against.
+
+- **`DECISIONS.md`** — added `ADR-031` (multiple status pages via a multi-row `status_pages` model),
+  `ADR-032` (Browser Push notifications via a `WebPushProvider`), `ADR-033` (Light/Dark/System theme),
+  and `ADR-034` (shared UI primitives).
+- **`DATABASE.md`** — added `status_pages` (§3.22) and `push_subscriptions` (§3.23); added
+  `websites.status_page_id` (nullable FK, `ON DELETE SET NULL`); extended
+  `notification_channels.type` to `ENUM('email','telegram','browser_push')`; added an additive,
+  data-preserving migration step migrating the `status_page_settings` singleton into one default
+  `status_pages` row.
+- **`PRD.md`** — added `FR-103`–`FR-109` (manual check trigger, theme, Browser Push, per-page
+  selector, modal-gated delete, multiple status pages, field help) and acceptance criteria
+  `AC-25`–`AC-31`; noted Browser Push in the notification channels table and §13.1 flow diagram.
+- **`STATUS-PAGE.md`** — added §1.4 (multiple status pages), per-page visibility (§2.0), per-page
+  unlock (§3.2), per-page redaction (§4), per-page cache (§9.2), admin CRUD routes (§11.4), and
+  per-page tests (§12.6). Public labels unchanged.
+- **`NOTIFICATIONS.md`** — added §7.3 Browser Push (payload, VAPID, subscription lifecycle,
+  suppression/cooldown unchanged, delivery logging redacted) and extended the extension guarantee
+  (§2.6).
+- **`ARCHITECTURE.md`** — added Browser Push + status-pages-admin components (§3), per-page status
+  flow (§10.4), and planned Phase 11 components/flows (§15) with GitHub-renderable Mermaid; extended
+  the notification flow diagram.
+- **`SECURITY.md`** — added VAPID/push-subscription secret classes (§4.1), a VAPID custody rule
+  including CSRF for registration (§4.2), new routes in §3.4, and per-page unlock/isolation (§3.5).
+- **`PLAN.md`** — added Phase 11 (Post-Release Feature Set) without renumbering Phases 0–10; added
+  traceability rows and backlog entries; per-page/theme/push acceptance criteria.
+- **`AGENTS.md`** — extended the notification-channel rule to include Browser Push and the
+  multi-page status clause. **`README.md` is intentionally not touched** (separate task).
+
+### Notes
+
+- Schema changes are **additive only**; no destructive migration is specified.
+- Existing single-status-page behaviour is preserved and migrated into the default page.
+
+---
+
 ## [2026-10-04] — Phase 10: Acceptance Evidence (AC-20…AC-23) + audit-event reconciliation
 
 ### Added (Phase 10 — acceptance evidence)

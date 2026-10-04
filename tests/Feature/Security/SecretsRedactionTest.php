@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Security;
 
 use App\Models\NotificationChannel;
+use App\Models\PushSubscription;
+use App\Models\User;
 use App\Services\Notifications\MessageRedactor;
 use Illuminate\Support\Facades\DB;
 
@@ -81,5 +83,47 @@ final class SecretsRedactionTest extends SecurityTestCase
         $redacted = (string) MessageRedactor::redact($message);
 
         $this->assertStringNotContainsString('AAHxyzABCdefGHIjklMNOpqrSTUvwxYZA12', $redacted);
+    }
+
+    public function test_redactor_scrubs_browser_push_material_and_vapid_private_key(): void
+    {
+        // VAPID private key and push subscription material must never survive
+        // redaction (SECURITY.md §4, ADR-032).
+        $samples = [
+            'vapid_private_key=SUPER-SECRET-PRIVATE-KEY' => 'SUPER-SECRET-PRIVATE-KEY',
+            'p256dh=BCdummyP256dhMaterialValue' => 'BCdummyP256dhMaterialValue',
+            '"private_key":"LEAKED-PRIVATE-KEY"' => 'LEAKED-PRIVATE-KEY',
+        ];
+
+        foreach ($samples as $input => $secret) {
+            $redacted = (string) MessageRedactor::redact($input);
+            $this->assertStringNotContainsString($secret, $redacted, "Redactor leaked push material: {$input}");
+        }
+    }
+
+    public function test_push_subscription_secrets_encrypted_and_hidden(): void
+    {
+        $user = User::factory()->create();
+        $endpoint = 'https://push.example.test/vapid-secret-endpoint';
+
+        $subscription = PushSubscription::create([
+            'user_id' => $user->id,
+            'endpoint' => $endpoint,
+            'endpoint_hash' => PushSubscription::hashEndpoint($endpoint),
+            'p256dh' => 'p256dh-client-key-material-secret',
+            'auth' => 'auth-client-secret-material-secret',
+            'enabled' => true,
+        ]);
+
+        foreach (['endpoint', 'p256dh', 'auth'] as $column) {
+            $raw = (string) DB::table('push_subscriptions')->where('id', $subscription->id)->value($column);
+            $this->assertStringNotContainsString('secret', $raw, "push_subscriptions.{$column} must be encrypted at rest");
+        }
+
+        $array = $subscription->toArray();
+        $this->assertArrayNotHasKey('endpoint', $array);
+        $this->assertArrayNotHasKey('p256dh', $array);
+        $this->assertArrayNotHasKey('auth', $array);
+        $this->assertStringNotContainsString('secret', json_encode($array));
     }
 }

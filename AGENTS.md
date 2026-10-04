@@ -169,10 +169,10 @@ Adding any forbidden technology requires a **superseding ADR** and is otherwise 
 ## 12. Notification Rules
 
 - **Keep the incident engine provider-agnostic.** Providers are added only via the provider contract ([`DECISIONS.md`](DECISIONS.md) ADR-010).
-- **Add providers only via the provider contract** — never special-case a provider inside the incident engine.
-- **Never bypass suppression/cooldown** ([`NOTIFICATIONS.md`](NOTIFICATIONS.md) §9).
+- **Add providers only via the provider contract** — never special-case a provider inside the incident engine. **Browser Push (`WebPushProvider`, Phase 11, `ADR-032`) is a provider, not a special case**: it implements the same contract and is registered in `NotificationProviderRegistry`.
+- **Never bypass suppression/cooldown** ([`NOTIFICATIONS.md`](NOTIFICATIONS.md) §9) — this applies unchanged to Browser Push.
 - **Never let notification failure fail a monitoring job** — nor block incident creation.
-- **Always log delivery attempts**, including failures, redacted.
+- **Always log delivery attempts**, including failures, redacted. Never log push subscription material (`push_subscriptions.endpoint`/`.p256dh`/`.auth`) or the VAPID private key.
 
 ---
 
@@ -208,7 +208,7 @@ These invariants **MUST NOT regress**. Assert them in tests where practical.
 2. **The two dimensions stay separate** — Availability and Security are never merged into one field.
 3. **The correlation guard stays enforced** — `CRITICAL` security escalation requires `>= 2` independent categories.
 4. **`/admin` stays protected** — unauthenticated access is rejected for every method.
-5. **The redaction boundary holds** — no security detail, keyword, domain, redirect target, rule id, or snapshot on the public status page.
+5. **The redaction boundary holds** — no security detail, keyword, domain, redirect target, rule id, or snapshot on the public status page. With multiple status pages (Phase 11, `ADR-031`) the boundary, visibility gate, and unlock session (`status_unlock.{page_id}`) hold **per page**; no page exposes another page's websites.
 6. **The SSRF guard cannot be bypassed** — no raw outbound client call outside the guard.
 7. **Monitoring stays out of the request path** — no outbound probe inside a web/HTTP request.
 8. **Retention pruning stays enabled** — `checks` 30d (cfg 30/60/90), `notification_logs` 90d, `snapshots` 14d, `incidents` 365d.

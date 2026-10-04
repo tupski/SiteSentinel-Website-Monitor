@@ -277,9 +277,12 @@ The schema and policies leave room without a rewrite:
 | --- | --- | --- |
 | `/` | none | login form only |
 | `/admin/*` | session | authentication + admin gate + resource policy |
-| `/status`, `/status.json` | none | `status_page_settings.visibility_mode` (`Private` \| `Public` \| `Password Protected`) |
+| `/status`, `/status.json` | none | `status_pages.visibility_mode` (`Private` \| `Public` \| `Password Protected`) |
+| `/status/{slug}`, `/status/{slug}.json` (Phase 11) | none | per-page `status_pages.visibility_mode`; legacy `/status` `302` redirects to the default page slug |
 | `/status/unlock` (POST) | none | status-page password, rate-limited (`throttle.status-unlock`) |
 | `/status/logout` (POST) | none | clears the status-page unlock session keys only |
+| `/admin/push/subscribe` (POST, Phase 11) | session | admin gate + **CSRF**; upserts a `push_subscriptions` row |
+| `/admin/status-pages*` (Phase 11) | session | admin gate + resource policy; CRUD of `status_pages` |
 
 The canonical spec fixes these routes; no other top-level route may be introduced at MVP.
 
@@ -307,6 +310,13 @@ the presence of `unlocked_at` **and** a `hash_equals` match of the stamp; becaus
 from `updated_at`, rotating the password (or any settings change) immediately revokes all existing
 unlocks. `/status/logout` forgets all three keys and **never** logs out the admin session.
 
+**Per-page unlock (Phase 11 — planned, `ADR-031`).** With multiple status pages the unlock is keyed
+per page (`status_unlock.{page_id}`) and each page compares its own `password_hash` and `updated_at`
+stamp. Unlocking one page MUST NOT unlock another, and rotating one page's password MUST NOT revoke
+another page's unlocked sessions. The legacy singleton keys (`status_page.unlocked_at`,
+`status_page.settings_updated_at`, `status_page.version`) remain the default page's keys for
+backward compatibility. Redaction (§14.4) is enforced **per page and independently**.
+
 **Cache isolation (implemented).** Only the redacted `PublicStatusDTO` is cached
 (`status:projection:v1:{sha1(mode)}:{updated_at}`); no raw `websites`/`incidents` row is ever stored,
 so a cache read cannot surface an unprojected field. The cache key contains no row identifier.
@@ -330,8 +340,11 @@ also emit `<meta name="robots" content="noindex, nofollow">`, and `public/robots
 | SMTP credentials | `notification_channels.secret_ref` | **Encrypted cast** (Laravel `encrypted` cast). |
 | Telegram bot token | `notification_channels.secret_ref` | **Encrypted cast**. |
 | Channel non-secret config | `notification_channels.config` (JSON) | Stored plaintext — e.g. sender address, chat id (not secret). |
-| Status page password | `status_page_settings.password_hash` | **One-way hash** — never reversible, never encrypted. |
+| Status page password | `status_pages.password_hash` (Phase 8: `status_page_settings.password_hash`) | **One-way hash** — never reversible, never encrypted. |
 | `settings` sensitive values | `settings.value` with `settings.is_encrypted = 1` | **Encrypted cast**, flagged by the column. |
+| VAPID private key (Browser Push) | Environment / `config/sentinel.php` (`VAPID_PRIVATE_KEY`) | Bootstrap value; **never logged**, never placed in a payload (Phase 11, `ADR-032`). |
+| Push subscription material | `push_subscriptions.endpoint` / `.p256dh` / `.auth` | Treat as secrets: **encrypted casts** where stored, never logged, never in a payload (Phase 11). |
+| VAPID subject | Environment (`VAPID_SUBJECT`) | Non-secret contact identifier. |
 
 `notification_channels` explicitly separates `config` (non-secret) from `secret_ref` (encrypted) in
 [`DATABASE.md`](DATABASE.md) §3.13; this document mandates that the split is honoured strictly.
@@ -356,6 +369,12 @@ also emit `<meta name="robots" content="noindex, nofollow">`, and `public/robots
 7. **Rotation.** `APP_KEY` rotation requires re-encryption of all encrypted casts (Laravel provides a
    key-rotation path); channel secrets and the status-page password can be rotated independently.
    `APP_KEY` rotation is treated as a planned maintenance operation, never a silent change.
+8. **VAPID key custody (Phase 11, `ADR-032`).** The VAPID **private** key is supplied via environment
+   / `config/sentinel.php` and is **never logged**, never rendered, and never serialized; only the
+   public key is sent to the browser. Push subscription material (`endpoint`, `p256dh`, `auth`) is
+   likewise never logged and never placed in a notification payload. Subscription registration and
+   unsubscribe are state-mutating admin actions and therefore require **CSRF** (`NFR-14`) in addition
+   to auth + admin.
 
 **Which `settings` keys are encrypted.** [`DATABASE.md`](DATABASE.md) §3.17 defines the `settings`
 table with an `is_encrypted` flag. At MVP, `settings` holds **no credential keys** — only operational
@@ -735,7 +754,8 @@ Supplementary events (not part of the security catalogue above, but emitted to `
 full traceability; they carry no secret): `auth.admin_provisioned` (out-of-band admin provisioning),
 `auth.password_reset_requested_unknown` (reset requested for an unknown email — enumeration-resistant),
 `auth.password_reset_failed` (reset token invalid/expired), `website.created` / `website.updated` /
-`website.deleted` / `website.toggled` (admin website CRUD), `notification.channel_created` /
+`website.deleted` / `website.toggled` (admin website CRUD), `website.check_queued` (manual run-check
+enqueued — no probe runs in the request path), `notification.channel_created` /
 `notification.channel_updated` / `notification.channel_deleted` (admin channel management), and
 `notification.channel_disabled` (circuit breaker — see [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §9).
 

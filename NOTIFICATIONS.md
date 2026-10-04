@@ -154,8 +154,8 @@ NotificationPayload {
 
 ### 2.6 The extension guarantee
 
-Adding a Future provider (WhatsApp, Webhook, or a Slack/Discord webhook expressed as a Webhook
-channel — [`DECISIONS.md`](DECISIONS.md) `ADR-011`) MUST require:
+Adding a Future provider (WhatsApp, Webhook, a Slack/Discord webhook expressed as a Webhook
+channel — [`DECISIONS.md`](DECISIONS.md) `ADR-011` — or Browser Push, §7.3) MUST require:
 
 1. a new provider class implementing the §2.3 contract,
 2. a registry binding, and
@@ -416,10 +416,11 @@ website content is attacker-influenced and MUST be treated as untrusted text.
 
 ## 7. Future Providers
 
-> **Both providers below are `Future` (`FR-74`, `FR-75`) and MUST NOT be built at MVP.** They are
-> documented so the abstraction in §2 provably accommodates them without incident-engine changes
-> (`ADR-010`, [`DECISIONS.md`](DECISIONS.md) assumptions: "WhatsApp/Webhook channels are explicitly
-> Future and must not be built now").
+> **The providers below are beyond the MVP boundary.** They are documented so the
+> abstraction in §2 provably accommodates them without incident-engine changes (`ADR-010`,
+> [`DECISIONS.md`](DECISIONS.md) assumptions: "WhatsApp/Webhook channels are explicitly Future and
+> must not be built now"). **Browser Push (§7.3)** was a planned extension (`ADR-032`) and is now
+> **implemented** in Phase 11 (Plan S5); WhatsApp (§7.1) and Webhook (§7.2) remain `Future`.
 
 ### 7.1 WhatsApp (`Future` — Phase 2, `FR-74`)
 
@@ -434,6 +435,46 @@ website content is attacker-influenced and MUST be treated as untrusted text.
   dimension that Email and Telegram do not.
 - **Abstraction fit** — the provider implements the §2.3 contract and maps `template_vars` into an
   approved template; the dispatcher and incident engine are unchanged.
+
+### 7.3 Browser Push (`Implemented` — Phase 11, `FR-105`; `ADR-032`)
+
+> **Implemented (Phase 11, Plan S5).** Browser Push is delivered through the **same provider contract**
+> as Email/Telegram (§2.3) and registered in `NotificationProviderRegistry`. The `IncidentEngine` is
+> **not modified** and contains no special-casing for Web Push — the extension guarantee (§2.6) is
+> the acceptance test. Provider: [`WebPushProvider`](app/Services/Notifications/Channels/WebPushProvider.php);
+> delivery is proven by `WebPushProviderTest`, `PushSubscriptionLifecycleTest`, and
+> `ProviderContractTest`.
+
+- **Channel type** — `notification_channels.type = 'browser_push'` ([`DATABASE.md`](DATABASE.md)
+  §3.13).
+- **Provider** — `WebPushProvider`, implementing `app/Contracts/NotificationProvider.php` exactly as
+  `EmailProvider` and `TelegramProvider` do.
+- **Subscriptions** — stored in **`push_subscriptions`** ([`DATABASE.md`](DATABASE.md) §3.23):
+  `user_id` (FK nullable), `website_id` (FK nullable), `endpoint` (UNIQUE hash), `p256dh`, `auth`,
+  `user_agent` (NULL), `enabled`, timestamps. A NULL `website_id` is an all-website subscription; a
+  NULL `user_id` is an unowned/admin-wide subscription.
+- **VAPID** — keys come from `config/sentinel.php` + env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT`). The **private key is never logged** and never placed in a payload.
+- **Dependency** — an optional Composer dependency `minishlink/web-push`; select a release compatible
+  with the **PHP 8.4 constraint**.
+- **Service worker** — a worker at `public/` handles the `push` event (render notification) and
+  `notificationclick` (route into the admin area). Opt-in registration JS lives in
+  `resources/js/app.js`.
+- **Subscription lifecycle**
+  - **Register** — `POST /admin/push/subscribe`, behind **auth + admin + CSRF**; upserts a
+    `push_subscriptions` row keyed by the endpoint hash.
+  - **Unsubscribe** — `DELETE` for the same resource; sets the row `enabled = 0` / removes it.
+  - The subscription is only created after explicit user opt-in in the browser.
+- **Payload** — the payload is **redacted through `MessageRedactor`** before send; it carries the
+  same redacted content the other providers carry and **no secret** (endpoint, `p256dh`, `auth`, or
+  VAPID private key) ever appears in it ([`SECURITY.md`](SECURITY.md) §4).
+- **Delivery logging** — written to `notification_logs` like any other provider; the `error` field is
+  **redacted** on failure ([`SECURITY.md`](SECURITY.md) §9).
+- **Suppression, cooldown, dedup** — **unchanged**: the existing `NotificationDispatcher` gates apply
+  identically (`FR-68`, §9); Browser Push adds no new suppression path.
+- **Failure semantics** — an expired/invalid subscription (push service `404`/`410`) is a
+  **permanent** failure for that subscription and disables it; it does not affect other channels or
+  subscriptions (`NFR-10`, §12.5).
 
 ### 7.2 Generic Webhook (`Future` — Phase 2, `FR-75`)
 

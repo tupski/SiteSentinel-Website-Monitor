@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\BulkWebsiteActionRequest;
 use App\Http\Requests\StoreWebsiteRequest;
 use App\Http\Requests\UpdateWebsiteRequest;
+use App\Jobs\RunWebsiteCheck;
 use App\Models\NotificationChannel;
 use App\Models\Website;
 use App\Services\Audit\AuditLogger;
+use App\Support\PerPage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -23,12 +26,15 @@ final class WebsiteController extends Controller
         private readonly AuditLogger $audit
     ) {}
 
-    public function index(): View
+    public function index(Request $request): View
     {
-        $websites = Website::query()
+        $query = Website::query()
             ->withTrashed(false) // only active (not soft-deleted)
-            ->orderBy('name')
-            ->get();
+            ->orderBy('name');
+
+        $websites = $query
+            ->paginate(PerPage::sizeFor($query, $request))
+            ->withQueryString();
 
         return view('admin.websites.index', compact('websites'));
     }
@@ -108,6 +114,104 @@ final class WebsiteController extends Controller
         return redirect()
             ->route('admin.websites.index')
             ->with('status', __('Website status updated.'));
+    }
+
+    /**
+     * Manually enqueue a monitoring check for one website.
+     *
+     * The request path queues only — it never performs an outbound probe
+     * (AGENTS.md §9; invariant "monitoring stays out of the request path").
+     * The per-website lock is enforced by the job itself, so overlapping checks
+     * stay protected. Job internals are never exposed to the caller.
+     */
+    public function runCheck(Request $request, Website $website): RedirectResponse
+    {
+        RunWebsiteCheck::dispatch($website);
+
+        $this->audit->log('website.check_queued', $request->user(), $website);
+
+        return redirect()
+            ->route('admin.websites.index')
+            ->with('status', __('Check queued for “:name”.', ['name' => $website->name]));
+    }
+
+    /**
+     * Bulk enable selected websites.
+     */
+    public function bulkEnable(BulkWebsiteActionRequest $request): RedirectResponse
+    {
+        return $this->bulkUpdateActive($request, true);
+    }
+
+    /**
+     * Bulk disable selected websites.
+     */
+    public function bulkDisable(BulkWebsiteActionRequest $request): RedirectResponse
+    {
+        return $this->bulkUpdateActive($request, false);
+    }
+
+    /**
+     * Bulk delete selected websites.
+     *
+     * Website rows are soft-deleted (DATABASE.md §7); incident history is
+     * append-only and telemetry retention is governed by its own windows, so the
+     * soft delete never orphans a FK and never cascades hard-deletes.
+     */
+    public function bulkDelete(BulkWebsiteActionRequest $request): RedirectResponse
+    {
+        $websites = Website::query()->whereKey($request->selectedIds())->get();
+
+        if ($websites->isEmpty()) {
+            return redirect()
+                ->route('admin.websites.index')
+                ->with('status', __('No websites selected.'));
+        }
+
+        foreach ($websites as $website) {
+            $this->audit->log('website.deleted', $request->user(), $website);
+            $website->delete();
+        }
+
+        return redirect()
+            ->route('admin.websites.index')
+            ->with('status', trans_choice(
+                '{0} No websites selected.|{1} Website deleted.|[2,*] :count websites deleted.',
+                $websites->count(),
+            ));
+    }
+
+    /**
+     * Apply an enable/disable decision to the selected websites only.
+     */
+    private function bulkUpdateActive(BulkWebsiteActionRequest $request, bool $active): RedirectResponse
+    {
+        $websites = Website::query()->whereKey($request->selectedIds())->get();
+
+        if ($websites->isEmpty()) {
+            return redirect()
+                ->route('admin.websites.index')
+                ->with('status', __('No websites selected.'));
+        }
+
+        foreach ($websites as $website) {
+            if ($website->is_active === $active) {
+                continue; // idempotent: already in the requested state
+            }
+
+            $website->update(['is_active' => $active]);
+
+            $this->audit->log('website.toggled', $request->user(), $website, [
+                'is_active' => $active,
+            ]);
+        }
+
+        return redirect()
+            ->route('admin.websites.index')
+            ->with('status', trans_choice(
+                '{0} No websites selected.|{1} Website status updated.|[2,*] :count websites updated.',
+                $websites->count(),
+            ));
     }
 
     /**

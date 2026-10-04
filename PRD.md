@@ -314,6 +314,7 @@ with one, a keyword appearing *newly and in an unexpected structural position* i
 | **FR-38** | `MVP` | Checks MUST enforce a maximum response body size to prevent memory exhaustion from a hostile or broken target. |
 | **FR-39** | `MVP` | Each check MUST produce a **persistent result record** even when it fails — "no data" is itself a signal and must never be silently dropped. |
 | **FR-40** | `Future` | Screenshot capture (headless browser) as an additional forensic artifact. |
+| **FR-103** | `Future` | Admin MUST be able to trigger a manual check for a website outside its scheduled cadence, subject to the manual-check rate limit (`FR-24`) and the scheduler/queue boundary (`FR-31`). |
 
 ### 8.6 Detection Engine
 
@@ -423,6 +424,12 @@ Detail (layout, caching, theming) lives in `STATUS-PAGE.md`.
 | **FR-100** | `MVP` | The system MUST surface queue backlog/scheduler health to Admin, so a silent monitoring outage (monitor is down, therefore no alerts) is itself detectable. |
 | **FR-101** | `MVP` | Notification delivery failures MUST be visible to Admin, not only written to logs. |
 | **FR-102** | `Future` | Time-series metrics export and external alerting on SiteSentinel's own health. |
+| **FR-104** | `Future` | The admin UI MUST support a three-state theme control — Light, Dark, System — where System follows the OS `prefers-color-scheme`, and the chosen theme MUST persist across sessions. |
+| **FR-105** | `Future` | The system MUST provide **Browser Push** as a notification channel delivered through the provider-independent dispatcher (`FR-64`), with per-subscription opt-in and unsubscribe. |
+| **FR-106** | `Future` | List views MUST offer a per-page selector with the fixed page-size set 10 / 20 / 50 / 100 / All, preserving the active query string; accepted values MUST be validated against a server-side whitelist. |
+| **FR-107** | `Future` | Destructive row actions (at minimum delete) MUST be gated by a confirmation modal, and icon-only row actions MUST carry an accessible label. |
+| **FR-108** | `Future` | Admin MUST be able to manage **multiple status pages** — create, edit, and delete named pages with a unique `slug`, mark one as default, and assign a website to a page. |
+| **FR-109** | `Future` | Form fields MAY expose contextual help; where help is shown it MUST be reachable both on hover (tooltip) and on click (modal). |
 
 ---
 
@@ -860,8 +867,10 @@ flowchart LR
     E --> G[Telegram provider]
     E --> H[Future: WhatsApp]
     E --> I[Future: Webhook]
+    E --> K[Future: Browser Push]
     F --> J[Delivery log]
     G --> J
+    K --> J
 ```
 
 ### 13.2 MVP channels
@@ -870,6 +879,7 @@ flowchart LR
 | --- | --- | --- |
 | **Email** | `MVP` (`FR-65`) | Configurable SMTP; one or more recipients; plain-text-with-markup body; link into the admin area. |
 | **Telegram** | `MVP` (`FR-66`) | Bot token + chat/channel identifier; concise formatted message; link into the admin area. |
+| **Browser Push** | `Future` (`FR-105`) | Web Push via VAPID; per-subscription opt-in and unsubscribe; delivered through the same provider contract as Email/Telegram. |
 | **WhatsApp** | `Future` (`FR-74`) | Out of MVP. |
 | **Webhook** | `Future` (`FR-75`) | Out of MVP. |
 
@@ -1086,7 +1096,10 @@ The following constitutes the **definitive MVP boundary**. Anything not on this 
 14. Provider-independent notification dispatcher with **Email** and **Telegram** channels, per-website
     overrides, deduplication, cooldown, recovery notifications, delivery logging.
 15. Status page at `/status` with Private / Public / Password Protected modes, availability-only
-    content, and the §14.4 public-exposure prohibition enforced.
+    content, and the §14.4 public-exposure prohibition enforced. *Phase 11 extends this to
+    multiple status pages served at `/status/{slug}` (`FR-108`, `AC-25`–`AC-27`) with the same
+    §14.4 prohibition enforced **per page**; this is additive and does not change the MVP
+    boundary below.*
 16. Retention jobs enforcing 30 / 365 / 90 / 14 defaults with check retention configurable to
     30/60/90.
 17. Observability sufficient to detect SiteSentinel's own silence: check logging, health/readiness
@@ -1110,6 +1123,11 @@ external metrics export.
 | Per-website retention overrides + export-before-prune (`FR-97`) | **Phase 2** | |
 | Incident comments and manual severity override with reason (`FR-63`) | **Phase 2** | |
 | Custom status-page branding, custom domain, historical uptime graphs (`FR-84`) | **Phase 2** | |
+| Multiple status pages with per-page visibility and assignment (`FR-108`, `AC-25`–`AC-27`) | **Phase 3** | Multi-row `status_pages` ([`DATABASE.md`](DATABASE.md) §3.22); per-page unlock + redaction. |
+| Browser Push notification channel (`FR-105`, `AC-28`) | **Phase 3** | Web Push via VAPID; same provider contract ([`NOTIFICATIONS.md`](NOTIFICATIONS.md) §7.3). |
+| Light / Dark / System theme (`FR-104`, `AC-29`) | **Phase 3** | No-FOUC bootstrap; tokens in `resources/css/app.css`. |
+| Manual check trigger (`FR-103`) | **Phase 2** | Subject to the manual-check rate limit and the queue boundary. |
+| Per-page selector, bulk actions, field help, modal-gated deletes (`FR-106`, `FR-107`, `FR-109`, `AC-30`, `AC-31`) | **Phase 3** | Shared UI primitives ([`DECISIONS.md`](DECISIONS.md) `ADR-034`). |
 | Bulk website import and grouping/tagging (`FR-16`) | **Phase 3** | Relevant once an operator approaches the upper end of the reference workload. |
 | Per-website custom headers / HTTP method (`FR-25`) | **Phase 3** | Introduces request-body and auth-material handling concerns that need their own security review. |
 | Cross-website correlation of suspicious domains (`FR-51`) | **Phase 3** | High value for agencies: one injected domain across several client sites is a strong, low-false-positive signal. |
@@ -1151,6 +1169,13 @@ verifiable by a test or a documented manual procedure.
 | **AC-22** | A failing notification channel does not prevent incident creation, and its failures are visible to Admin. |
 | **AC-23** | The system runs with no calls to third-party telemetry, analytics, or update services. |
 | **AC-24** | The UI is server-rendered with Turbo; no SPA framework is present in the dependency tree (`§22`). |
+| **AC-25** | An Admin can create, edit, and delete multiple status pages, each with a unique `slug` and its own visibility mode; the public URL `/status/{slug}` serves the addressed page, and legacy `/status` redirects `302` to the default page's slug. |
+| **AC-26** | A website assigned `status_page_id` appears only on that page; a website with a NULL `status_page_id` falls back to the default page. The per-page visibility gate and the redaction boundary hold independently per page. |
+| **AC-27** | The unlock flow for a `Password Protected` page is keyed per page (`status_unlock.{page_id}`); unlocking one page does not unlock another. |
+| **AC-28** | Browser Push is delivered through the provider-independent dispatcher with no special-casing in incident logic; a registered subscription receives an incident alert, an unsubscribe stops delivery, and no secret (endpoint, `p256dh`, `auth`, VAPID private key) is ever logged or placed in a payload. |
+| **AC-29** | The admin UI offers Light / Dark / System theme control, persists the choice across sessions, follows `prefers-color-scheme` when set to System, and applies the theme with no flash-of-wrong-theme on first paint. |
+| **AC-30** | A list view per-page selector offers 10 / 20 / 50 / 100 / All, preserves the active query string, and rejects page-size values outside the server-side whitelist. |
+| **AC-31** | Delete actions are confirmed by a modal before the request is sent, and icon-only row actions expose an accessible label. |
 
 ---
 

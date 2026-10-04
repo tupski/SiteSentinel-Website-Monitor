@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace App\Services\StatusPage;
 
-use App\Models\StatusPageSetting;
-use App\Models\Website;
+use App\Models\StatusPage;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * Projection cache (STATUS-PAGE.md §9).
+ * Per-page projection cache (STATUS-PAGE.md §9, ADR-031).
  *
- * Caches DTO only. Never raw rows.
+ * Caches DTO only. Never raw rows. The cache key includes the page id and slug
+ * (via a hash), so one page can never serve another page's projection.
+ *
+ * Invalidation is a global epoch bump: the epoch participates in every key, so
+ * a single increment supersedes all cached projections across all pages in one
+ * step (there is no reliable way to enumerate cache keys without tags).
  */
 final class StatusPageCache
 {
@@ -19,25 +23,25 @@ final class StatusPageCache
         private readonly StatusProjector $projector,
     ) {}
 
-    public function remember(StatusPageSetting $settings): PublicStatusDTO
+    public function remember(StatusPage $page): PublicStatusDTO
     {
-        $ttl = $this->ttl();
-        $key = $this->key($settings);
+        $ttl = $this->ttl($page);
+        $key = $this->key($page);
 
         /** @var PublicStatusDTO $dto */
-        $dto = Cache::remember($key, $ttl, fn (): PublicStatusDTO => $this->projector->project());
+        $dto = Cache::remember($key, $ttl, fn (): PublicStatusDTO => $this->projector->project($page));
 
         return $dto;
     }
 
-    public function invalidate(): void
+    public function invalidate(?StatusPage $page = null): void
     {
         try {
-            $prefix = (string) config('sentinel.status_page.cache_prefix', 'status:projection:v1');
-            $settings = StatusPageSetting::singleton();
-            $stamp = $settings->updated_at?->copy()->setTimezone('UTC')->format('Y-m-d\TH:i:s\Z') ?? 'never';
-            foreach (['Private', 'Public', 'Password Protected'] as $mode) {
-                Cache::forget($prefix.':'.sha1($mode).':'.$stamp);
+            $this->bumpEpoch();
+
+            if ($page !== null) {
+                $page->refresh();
+                Cache::forget($this->key($page));
             }
         } catch (\Throwable $e) {
             report($e);
@@ -53,28 +57,47 @@ final class StatusPageCache
         }
     }
 
-    public function key(StatusPageSetting $settings): string
+    public function key(?StatusPage $page = null): string
     {
-        $prefix = (string) config('sentinel.status_page.cache_prefix', 'status:projection:v1');
-        $modeHash = sha1((string) $settings->visibility_mode);
-        $stamp = $settings->updated_at?->copy()->setTimezone('UTC')->format('Y-m-d\TH:i:s\Z') ?? 'never';
+        $page ??= StatusPage::resolveDefault();
 
-        return $prefix.':'.$modeHash.':'.$stamp;
+        $prefix = (string) config('sentinel.status_page.cache_prefix', 'status:projection:v1');
+        $slugHash = sha1((string) $page->slug);
+        $stamp = $page->updated_at?->copy()->setTimezone('UTC')->format('Y-m-d\TH:i:s\Z') ?? 'never';
+
+        return $prefix.':'.$slugHash.':'.$page->id.':'.$stamp.':'.$this->epoch();
     }
 
-    public function ttl(): int
+    public function ttl(?StatusPage $page = null): int
     {
+        $page ??= StatusPage::resolveDefault();
+
         $floor = max(1, (int) config('sentinel.status_page.ttl_floor', 60));
 
-        $shortest = Website::query()
-            ->where('is_active', true)
-            ->where('is_visible_on_status', true)
-            ->min('check_interval_seconds');
+        $shortest = $this->projector->publishedQuery($page)->min('check_interval_seconds');
 
         if ($shortest === null) {
             return $floor;
         }
 
         return max($floor, (int) $shortest);
+    }
+
+    private function epoch(): int
+    {
+        return max(1, (int) Cache::get($this->epochKey(), 1));
+    }
+
+    private function bumpEpoch(): void
+    {
+        $key = $this->epochKey();
+        Cache::forever($key, max(1, (int) Cache::get($key, 1)) + 1);
+    }
+
+    private function epochKey(): string
+    {
+        $prefix = (string) config('sentinel.status_page.cache_prefix', 'status:projection:v1');
+
+        return $prefix.':epoch';
     }
 }

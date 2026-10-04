@@ -36,9 +36,12 @@ final class CsrfSessionTest extends SecurityTestCase
         $stateChanging = [
             'login.attempt', 'logout', 'password.email', 'password.update',
             'admin.websites.store', 'admin.websites.update', 'admin.websites.destroy',
-            'admin.websites.toggle', 'admin.incidents.acknowledge', 'admin.incidents.resolve',
+            'admin.websites.toggle', 'admin.websites.check',
+            'admin.websites.bulk.enable', 'admin.websites.bulk.disable', 'admin.websites.bulk.delete',
+            'admin.incidents.acknowledge', 'admin.incidents.resolve',
             'admin.notifications.store', 'admin.notifications.update', 'admin.notifications.destroy',
-            'admin.notifications.test-send', 'admin.status-settings.update',
+            'admin.notifications.test-send', 'admin.notifications.test', 'admin.status-settings.update',
+            'admin.push.subscribe', 'admin.push.unsubscribe', 'admin.push.test',
             'status.unlock', 'status.logout',
         ];
 

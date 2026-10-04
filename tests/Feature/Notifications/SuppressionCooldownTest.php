@@ -108,6 +108,40 @@ final class SuppressionCooldownTest extends TestCase
         $this->assertSame(1, $cooldown->suppressed_count);
     }
 
+    /**
+     * Cooldown applies unchanged to Browser Push (ADR-032, NOTIFICATIONS §9):
+     * a repeat reminder inside the window is suppressed for a `browser_push`
+     * channel exactly as for email. No real network is reached — with VAPID
+     * unset the provider fails closed, but the cooldown gate still fires.
+     */
+    public function test_browser_push_respects_cooldown(): void
+    {
+        config()->set('sentinel.push.vapid_public_key', '');
+        config()->set('sentinel.push.vapid_private_key', '');
+
+        $channel = NotificationChannel::create([
+            'type' => 'browser_push',
+            'name' => 'Browser push',
+            'enabled' => true,
+            'config' => ['min_severity' => 'WARNING'],
+        ]);
+        $incident = $this->incident($this->website());
+        $dispatcher = app(NotificationDispatcher::class);
+
+        $dispatcher->dispatch($incident->id, NotificationDispatcher::EVENT_REMINDER);
+        $dispatcher->dispatch($incident->id, NotificationDispatcher::EVENT_REMINDER);
+
+        $this->assertSame(1, NotificationLog::query()
+            ->where('channel_id', $channel->id)
+            ->where('status', 'suppressed')
+            ->count());
+
+        $cooldown = NotificationCooldown::query()
+            ->where('cooldown_key', NotificationDispatcher::cooldownKey((int) $channel->id, $incident->website_id))
+            ->firstOrFail();
+        $this->assertSame(1, $cooldown->suppressed_count);
+    }
+
     public function test_escalation_bypasses_cooldown(): void
     {
         $channel = $this->emailChannel();

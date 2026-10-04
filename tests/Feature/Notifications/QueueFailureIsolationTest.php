@@ -151,6 +151,39 @@ final class QueueFailureIsolationTest extends TestCase
         $this->assertGreaterThanOrEqual(2, Check::query()->where('website_id', $website->id)->count());
     }
 
+    /**
+     * A failing Browser Push channel never fails the monitoring job or
+     * incident creation (ADR-032, NOTIFICATIONS §12.5, NFR-07). VAPID is left
+     * unset so the provider fails closed without any real network call.
+     */
+    public function test_failing_browser_push_never_fails_check_or_incident_creation(): void
+    {
+        config()->set('sentinel.push.vapid_public_key', '');
+        config()->set('sentinel.push.vapid_private_key', '');
+
+        NotificationChannel::create([
+            'type' => 'browser_push',
+            'name' => 'Browser push',
+            'enabled' => true,
+            'config' => ['min_severity' => 'WARNING'],
+        ]);
+        $website = $this->website();
+
+        $this->runJob($website);
+
+        $this->travel(5)->minutes();
+        $this->down = true;
+        $this->runJob($website);
+
+        $this->travel(5)->minutes();
+        $this->runJob($website);
+
+        $incident = Incident::query()->sole();
+        $this->assertSame('availability', $incident->type);
+        $this->assertSame('DETECTED', $incident->status);
+        $this->assertGreaterThanOrEqual(2, Check::query()->where('website_id', $website->id)->count());
+    }
+
     /** Retries bounded on both notification jobs. */
     public function test_bounded_tries(): void
     {

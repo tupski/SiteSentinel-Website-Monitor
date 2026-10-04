@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Security;
 
-use App\Models\StatusPageSetting;
+use App\Models\StatusPage;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -40,40 +40,47 @@ final class ThrottlingTest extends SecurityTestCase
             ->assertSessionHasErrors('email');
     }
 
+    private function protectedPage(): StatusPage
+    {
+        $page = StatusPage::query()->firstOrCreate(
+            ['slug' => StatusPage::DEFAULT_SLUG],
+            ['name' => 'Default', 'is_default' => true, 'visibility_mode' => StatusPage::MODE_PRIVATE]
+        );
+        $page->visibility_mode = StatusPage::MODE_PASSWORD_PROTECTED;
+        $page->password_hash = Hash::make('correct-horse-battery');
+        $page->save();
+
+        return $page;
+    }
+
     public function test_status_unlock_is_throttled_and_returns_retry_after(): void
     {
-        $settings = StatusPageSetting::singleton();
-        $settings->visibility_mode = StatusPageSetting::MODE_PASSWORD_PROTECTED;
-        $settings->password_hash = Hash::make('correct-horse-battery');
-        $settings->save();
+        $page = $this->protectedPage();
 
-        $locked = $this->get(route('status.show'));
+        $locked = $this->get(route('status.show', ['statusPage' => $page->slug]));
         $this->forwardCookie($locked);
 
         for ($i = 0; $i < 5; $i++) {
-            $this->forwardCookie($this->post(route('status.unlock'), ['password' => 'wrong']));
+            $this->forwardCookie($this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'wrong']));
         }
 
-        $blocked = $this->post(route('status.unlock'), ['password' => 'wrong']);
+        $blocked = $this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'wrong']);
         $blocked->assertStatus(429);
         $this->assertGreaterThan(0, (int) $blocked->headers->get('Retry-After'));
     }
 
     public function test_successful_unlock_clears_the_throttle_counter(): void
     {
-        $settings = StatusPageSetting::singleton();
-        $settings->visibility_mode = StatusPageSetting::MODE_PASSWORD_PROTECTED;
-        $settings->password_hash = Hash::make('correct-horse-battery');
-        $settings->save();
+        $page = $this->protectedPage();
 
-        $locked = $this->get(route('status.show'));
+        $locked = $this->get(route('status.show', ['statusPage' => $page->slug]));
         $this->forwardCookie($locked);
 
-        $this->forwardCookie($this->post(route('status.unlock'), ['password' => 'wrong']));
+        $this->forwardCookie($this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'wrong']));
 
         // The rate-limit key must be cleared after a correct unlock.
         $key = 'status-unlock:127.0.0.1:'.session()->getId();
-        $this->forwardCookie($this->post(route('status.unlock'), ['password' => 'correct-horse-battery']));
+        $this->forwardCookie($this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'correct-horse-battery']));
         $this->assertSame(0, RateLimiter::attempts($key));
     }
 

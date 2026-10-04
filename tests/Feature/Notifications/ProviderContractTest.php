@@ -14,6 +14,7 @@ use App\Models\NotificationLog;
 use App\Models\Website;
 use App\Services\Notifications\Channels\EmailProvider;
 use App\Services\Notifications\Channels\TelegramProvider;
+use App\Services\Notifications\Channels\WebPushProvider;
 use App\Services\Notifications\CircuitBreaker;
 use App\Services\Notifications\MessageRedactor;
 use App\Services\Notifications\NotificationDispatcher;
@@ -99,18 +100,21 @@ final class ProviderContractTest extends TestCase
         ], $overrides));
     }
 
-    /** Registry resolves both MVP types via container. */
+    /** Registry resolves every provider type via container. */
     public function test_fake_provider_registration_resolves(): void
     {
         $registry = app(NotificationProviderRegistry::class);
 
         $this->assertInstanceOf(EmailProvider::class, $registry->resolve('email'));
         $this->assertInstanceOf(TelegramProvider::class, $registry->resolve('telegram'));
+        $this->assertInstanceOf(WebPushProvider::class, $registry->resolve('browser_push'));
         $this->assertTrue(NotificationProviderRegistry::known('email'));
         $this->assertTrue(NotificationProviderRegistry::known('telegram'));
+        $this->assertTrue(NotificationProviderRegistry::known('browser_push'));
         $this->assertFalse(NotificationProviderRegistry::known('smoke-signal'));
         $this->assertTrue($registry->resolve('email') instanceof NotificationProvider);
         $this->assertTrue($registry->resolve('email')->supports(NotificationDispatcher::EVENT_OPENED));
+        $this->assertTrue($registry->resolve('browser_push')->supports(NotificationDispatcher::EVENT_OPENED));
     }
 
     /** Ok result logged sent. */

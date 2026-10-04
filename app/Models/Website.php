@@ -58,6 +58,7 @@ final class Website extends Model
         'host',
         'is_active',
         'is_visible_on_status',
+        'status_page_id',
         'status_alias',
         'check_interval_seconds',
         'timeout_seconds',
@@ -109,6 +110,23 @@ final class Website extends Model
     public function currentBaseline(): BelongsTo
     {
         return $this->belongsTo(WebsiteBaseline::class, 'current_baseline_id');
+    }
+
+    /**
+     * Status page this website is explicitly assigned to (nullable). A NULL
+     * assignment resolves to the default status page (ADR-031).
+     */
+    public function statusPage(): BelongsTo
+    {
+        return $this->belongsTo(StatusPage::class, 'status_page_id');
+    }
+
+    /**
+     * Effective page for this website: its assigned page, else the default.
+     */
+    public function effectiveStatusPage(): StatusPage
+    {
+        return $this->statusPage ?? StatusPage::resolveDefault();
     }
 
     /**

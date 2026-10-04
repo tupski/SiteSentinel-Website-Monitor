@@ -28,6 +28,11 @@ final class MessageRedactor
         'x-api-key',
         'bot_token',
         'smtp',
+        // Browser Push material (SECURITY.md §4, ADR-032): VAPID private key
+        // and subscription material must never survive redaction.
+        'p256dh',
+        'vapid_private_key',
+        'private_key',
     ];
 
     public static function redact(?string $message): ?string

@@ -10,6 +10,7 @@ use App\Services\Audit\AuditLogger;
 use App\Services\Incidents\IncidentStateMachine;
 use App\Services\Notifications\NotificationDispatcher;
 use App\Services\Notifications\NotificationIntents;
+use App\Support\PerPage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -30,7 +31,7 @@ final class IncidentController extends Controller
 
     public function index(Request $request): View
     {
-        $incidents = Incident::query()
+        $query = Incident::query()
             ->with(['website', 'acknowledgedBy', 'resolvedBy'])
             ->when($request->filled('status') && $this->isValidStatus((string) $request->query('status')), function ($query) use ($request): void {
                 $query->where('status', (string) $request->query('status'));
@@ -44,8 +45,10 @@ final class IncidentController extends Controller
             ->when($request->filled('website_id') && is_numeric($request->query('website_id')), function ($query) use ($request): void {
                 $query->where('website_id', (int) $request->query('website_id'));
             })
-            ->orderByDesc('detected_at')
-            ->paginate(25)
+            ->orderByDesc('detected_at');
+
+        $incidents = $query
+            ->paginate(PerPage::sizeFor($query, $request))
             ->withQueryString();
 
         return view('admin.incidents.index', [

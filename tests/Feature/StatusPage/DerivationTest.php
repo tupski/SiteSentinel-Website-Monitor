@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\StatusPage;
 
 use App\Models\Check;
-use App\Models\StatusPageSetting;
+use App\Models\StatusPage;
 
 /**
  * Public label derivation (STATUS-PAGE.md §5.3, §6.6, §12.4).
@@ -29,7 +29,7 @@ final class DerivationTest extends StatusPageTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->setMode(StatusPageSetting::MODE_PUBLIC);
+        $this->setMode(StatusPage::MODE_PUBLIC);
     }
 
     /**
@@ -154,7 +154,8 @@ final class DerivationTest extends StatusPageTestCase
 
     public function test_empty_set_is_unknown_banner(): void
     {
-        $response = $this->getJson(route('status.json'));
+        $page = $this->defaultPage();
+        $response = $this->getJson(route('status.json', ['statusPage' => $page->slug]));
         $response->assertOk();
         $response->assertJsonPath('banner', 'Unknown');
         $response->assertJsonPath('services', []);
@@ -167,7 +168,7 @@ final class DerivationTest extends StatusPageTestCase
         $this->makeWebsite(['status_alias' => 'C', 'status_availability' => 'UP', 'status_security' => 'INCIDENT']);
         $this->makeWebsite(['status_alias' => 'D', 'status_availability' => 'DOWN', 'status_security' => 'OK']);
 
-        $response = $this->getJson(route('status.json'));
+        $response = $this->getJson(route('status.json', ['statusPage' => $this->defaultPage()->slug]));
         $response->assertOk();
         $response->assertJsonPath('banner', 'Partial Outage');
     }
@@ -181,7 +182,7 @@ final class DerivationTest extends StatusPageTestCase
 
         $this->makeWebsite(['status_alias' => 'B', 'status_availability' => 'UP', 'status_security' => 'INCIDENT']);
 
-        $response = $this->getJson(route('status.json'));
+        $response = $this->getJson(route('status.json', ['statusPage' => $this->defaultPage()->slug]));
         $response->assertOk();
         $response->assertJsonPath('banner', 'Major Outage');
     }
@@ -214,12 +215,13 @@ final class DerivationTest extends StatusPageTestCase
     public function test_history_section_toggles_with_config(): void
     {
         $this->makeWebsite(['status_alias' => 'Alpha']);
+        $slug = $this->defaultPage()->slug;
 
         config(['sentinel.status_page.history_enabled' => false]);
-        $this->get(route('status.show'))->assertOk()->assertDontSee('History', false);
+        $this->get(route('status.show', ['statusPage' => $slug]))->assertOk()->assertDontSee('History', false);
 
         config(['sentinel.status_page.history_enabled' => true]);
-        $this->get(route('status.show'))->assertOk()->assertSee('History', false);
+        $this->get(route('status.show', ['statusPage' => $slug]))->assertOk()->assertSee('History', false);
     }
 
     public function test_websites_are_ordered_by_alias_then_name(): void

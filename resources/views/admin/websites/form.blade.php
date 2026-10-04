@@ -1,3 +1,4 @@
+@php use App\Support\HttpStatusCodes; @endphp
 <x-admin-layout>
     <x-slot name="title">{{ $website ? __('Edit website') : __('Add website') }} — SiteSentinel</x-slot>
 
@@ -16,66 +17,77 @@
                 @method('PUT')
             @endif
 
-            <div>
-                <label for="name" class="block text-sm font-medium text-slate-700">{{ __('Name') }}</label>
+            <x-form.field name="name" :label="__('Name')" required
+                          hint="{{ __('A short label shown in listings and alerts.') }}"
+                          help="{{ __('Used only inside SiteSentinel. Choose something an operator will recognise, e.g. “Corporate site”. Maximum 255 characters.') }}">
                 <input id="name" name="name" type="text" value="{{ old('name', $website?->name) }}" required
-                       class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
-                @error('name')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-            </div>
+                       aria-describedby="name-hint" aria-invalid="{{ $errors->has('name') ? 'true' : 'false' }}"
+                       class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
+            </x-form.field>
 
-            <div>
-                <label for="url" class="block text-sm font-medium text-slate-700">{{ __('URL') }}</label>
+            <x-form.field name="url" :label="__('URL')" required
+                          hint="{{ __('Full URL including https://.') }}"
+                          help="{{ __('Must use http or https and resolve to a public destination. Private, loopback and link-local addresses are rejected (SSRF protection, SECURITY.md §5). Maximum 2048 characters.') }}">
                 <input id="url" name="url" type="url" value="{{ old('url', $website?->url) }}" required placeholder="https://example.com"
-                       class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
-                <p class="mt-1 text-xs text-slate-500">{{ __('Must use http or https and point to a public, non-internal destination.') }}</p>
-                @error('url')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-            </div>
+                       aria-describedby="url-hint" aria-invalid="{{ $errors->has('url') ? 'true' : 'false' }}"
+                       class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
+            </x-form.field>
 
             <div class="grid grid-cols-1 gap-6 md:grid-cols-3">
-                <div>
-                    <label for="check_interval_seconds" class="block text-sm font-medium text-slate-700">{{ __('Check interval (seconds)') }}</label>
+                <x-form.field name="check_interval_seconds" :label="__('Check interval (seconds)')" required
+                              hint="{{ __('Minimum 60 seconds.') }}"
+                              help="{{ __('How often the monitor probes this URL. 300s (5 minutes) is a reasonable default; shorter intervals increase load on the target. Minimum allowed is 60 seconds.') }}">
                     <input id="check_interval_seconds" name="check_interval_seconds" type="number" min="60" value="{{ old('check_interval_seconds', $website?->check_interval_seconds ?? 300) }}" required
-                           class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
-                    @error('check_interval_seconds')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-                </div>
+                           aria-describedby="check_interval_seconds-hint" aria-invalid="{{ $errors->has('check_interval_seconds') ? 'true' : 'false' }}"
+                           class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
+                </x-form.field>
 
-                <div>
-                    <label for="timeout_seconds" class="block text-sm font-medium text-slate-700">{{ __('Timeout (seconds)') }}</label>
+                <x-form.field name="timeout_seconds" :label="__('Timeout (seconds)')" required
+                              hint="{{ __('Between 3 and 30 seconds.') }}"
+                              help="{{ __('How long to wait for the response before treating the check as a failure. Must be between 3 and 30 seconds; keep it below the check interval.') }}">
                     <input id="timeout_seconds" name="timeout_seconds" type="number" min="3" max="30" value="{{ old('timeout_seconds', $website?->timeout_seconds ?? 10) }}" required
-                           class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
-                    @error('timeout_seconds')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-                </div>
+                           aria-describedby="timeout_seconds-hint" aria-invalid="{{ $errors->has('timeout_seconds') ? 'true' : 'false' }}"
+                           class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
+                </x-form.field>
 
-                <div>
-                    <label for="expected_status" class="block text-sm font-medium text-slate-700">{{ __('Expected HTTP status') }}</label>
-                    <input id="expected_status" name="expected_status" type="number" min="100" max="599" value="{{ old('expected_status', $website?->expected_status ?? 200) }}" required
-                           class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
-                    @error('expected_status')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-                </div>
+                <x-form.field name="expected_status" :label="__('Expected HTTP status')" required
+                              hint="{{ __('Status code the site should return.') }}"
+                              help="{{ __('The monitor raises RULE-AV-002 when the observed status differs from this value. Choose the code a healthy response returns — e.g. 200 for a normal page, 301/302 if the site is expected to redirect. 304 and 401 are always tolerated.') }}">
+                    <select id="expected_status" name="expected_status" required
+                            aria-describedby="expected_status-hint" aria-invalid="{{ $errors->has('expected_status') ? 'true' : 'false' }}"
+                            class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
+                        @foreach (HttpStatusCodes::CATALOGUE as $code => $label)
+                            <option value="{{ $code }}" @selected((int) old('expected_status', $website?->expected_status ?? 200) === $code)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </x-form.field>
             </div>
 
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div>
-                    <label for="expected_title" class="block text-sm font-medium text-slate-700">{{ __('Expected page title') }}</label>
+                <x-form.field name="expected_title" :label="__('Expected page title')"
+                              hint="{{ __('Optional.') }}"
+                              help="{{ __('If set, the monitor compares the page <title> against this value and flags drift as a content-health signal. Leave blank to skip the check. Maximum 512 characters.') }}">
                     <input id="expected_title" name="expected_title" type="text" value="{{ old('expected_title', $website?->expected_title) }}"
-                           class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
-                    @error('expected_title')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-                </div>
+                           aria-describedby="expected_title-hint" aria-invalid="{{ $errors->has('expected_title') ? 'true' : 'false' }}"
+                           class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
+                </x-form.field>
 
-                <div>
-                    <label for="expected_final_domain" class="block text-sm font-medium text-slate-700">{{ __('Expected final domain') }}</label>
+                <x-form.field name="expected_final_domain" :label="__('Expected final domain')"
+                              hint="{{ __('Optional. Use when redirects are expected.') }}"
+                              help="{{ __('The domain the site should end up on after following redirects. If the final domain differs, the monitor raises a redirect-hijack signal. Leave blank to skip. Maximum 255 characters.') }}">
                     <input id="expected_final_domain" name="expected_final_domain" type="text" value="{{ old('expected_final_domain', $website?->expected_final_domain) }}"
-                           class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
-                    @error('expected_final_domain')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-                </div>
+                           aria-describedby="expected_final_domain-hint" aria-invalid="{{ $errors->has('expected_final_domain') ? 'true' : 'false' }}"
+                           class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">
+                </x-form.field>
             </div>
 
-            <div>
-                <label for="note" class="block text-sm font-medium text-slate-700">{{ __('Note') }}</label>
+            <x-form.field name="note" :label="__('Note')"
+                          hint="{{ __('Optional free text.') }}"
+                          help="{{ __('Operator notes about this monitor — ownership, contacts, maintenance windows. Not sent in alert payloads.') }}">
                 <textarea id="note" name="note" rows="3"
-                          class="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">{{ old('note', $website?->note) }}</textarea>
-                @error('note')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
-            </div>
+                          aria-describedby="note-hint" aria-invalid="{{ $errors->has('note') ? 'true' : 'false' }}"
+                          class="block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none">{{ old('note', $website?->note) }}</textarea>
+            </x-form.field>
 
             <div class="flex flex-wrap items-center gap-4">
                 <label class="inline-flex items-center gap-2">

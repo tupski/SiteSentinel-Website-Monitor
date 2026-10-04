@@ -4,16 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
-    <title>{{ isset($branding['title']) && $branding['title'] !== '' ? $branding['title'] : 'System Status' }}</title>
+    <title>{{ $statusPage->name !== '' ? $statusPage->name : 'System Status' }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-900 antialiased">
 <main class="mx-auto max-w-3xl px-4 py-10">
     <header class="mb-6">
-        <h1 class="text-2xl font-bold tracking-tight">{{ isset($branding['title']) && $branding['title'] !== '' ? $branding['title'] : 'System Status' }}</h1>
-        @if(isset($branding['message']) && $branding['message'] !== '')
-            <p class="mt-2 text-sm text-slate-600">{{ $branding['message'] }}</p>
-        @endif
+        <h1 class="text-2xl font-bold tracking-tight">{{ $statusPage->name !== '' ? $statusPage->name : 'System Status' }}</h1>
     </header>
 
     <section aria-label="Overall status" class="mb-6 rounded border border-slate-200 bg-white p-4">
@@ -43,12 +40,6 @@
     @endif
 
     <p class="mt-6 text-xs text-slate-500">Updated {{ $dto->updatedDayBucket }} (day-level, UTC).</p>
-
-    <footer class="mt-2 text-xs text-slate-500">
-        @if(isset($branding['footer']) && $branding['footer'] !== '')
-            {{ $branding['footer'] }}
-        @endif
-    </footer>
 </main>
 </body>
 </html>

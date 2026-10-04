@@ -818,6 +818,158 @@ SECURITY.md §12.1.3).
 
 ---
 
+## ADR-031: Multiple Status Pages (multi-row `status_pages`)
+
+**Status** — Accepted (implemented; owning phase [`PLAN.md`](PLAN.md) Phase 11)
+
+**Context** — The Phase 8 status page is a singleton: [`DATABASE.md`](DATABASE.md) §3.18
+`status_page_settings` holds a single logical row (id = 1), the public route is `GET /status`,
+and per-page concepts such as visibility mode, password, and unlock session are global. Operators
+need more than one status page — one per audience/tenant/brand — each independently
+configured, each with its own visibility mode and redaction boundary.
+
+**Decision** — Replace the singleton with a multi-row model:
+
+- New table **`status_pages`** with columns `id`, `name`, `slug` (UNIQUE), `is_default`,
+  `visibility_mode`, `password_hash` (NULL), `created_by` (FK `users`), `created_at`/`updated_at`.
+- New nullable FK **`websites.status_page_id`** -> `status_pages.id`, `ON DELETE SET NULL`. A
+  website with `status_page_id IS NULL` **falls back to the default page** (`is_default = 1`).
+- The existing single-row `status_page_settings` is **migrated into one default `status_pages`
+  row** — data-preserving and additive; no row is destroyed.
+- Public URL becomes **`/status/{slug}`**. Legacy **`/status`** responds `302` redirect to the
+  default page's slug (`/status/{default-slug}`).
+- Unlock session keying becomes **per-page**: `status_unlock.{page_id}` (replacing the global key).
+- `StatusPageCache` key includes the **page id**.
+- Admin CRUD at **`/admin/status-pages`** (`index`/`create`/`store`/`edit`/`update`/`destroy`)
+  behind **auth + admin**.
+- The **redaction boundary is unchanged per page** — each page redacts on the same boundary
+  ([`STATUS-PAGE.md`](STATUS-PAGE.md) §4), independently of any other page.
+
+**Alternatives considered** — Extending `status_page_settings` with extra rows (rejected — the
+singleton assumption is baked into `StatusPageSetting::singleton()` and the cache/unlock keys);
+a per-website slug column (rejected — pages are audiences, not websites, and many websites share
+a page).
+
+**Consequences** — *Positive:* one deployment serves several audiences; per-page visibility and
+password; additive migration preserves existing config. *Negative:* one more FK on the hot
+`websites` table; `StatusPageSetting::singleton()` callers must resolve the default or the
+website's assigned page.
+
+**Related** — [`DATABASE.md`](DATABASE.md) §3.18/§3.22; [`STATUS-PAGE.md`](STATUS-PAGE.md);
+[`ARCHITECTURE.md`](ARCHITECTURE.md) §10; [`SECURITY.md`](SECURITY.md) §3.5; ADR-013, ADR-029.
+
+---
+
+## ADR-032: Browser Push notifications
+
+**Status** — Accepted (implemented; owning phase [`PLAN.md`](PLAN.md) Phase 11)
+
+**Context** — Alerting currently ships Email + Telegram providers behind the provider-independent
+dispatcher (`ADR-010`, `ADR-011`). A third delivery channel — **browser push** — is wanted so an
+Admin receives incident alerts in the browser without an installed native app. Two constraints
+apply: the incident engine must stay provider-agnostic (never special-case a provider), and no
+secret may ever be logged (`SECURITY.md` §4).
+
+**Decision**
+
+- New table **`push_subscriptions`** with columns `id`, `user_id` (FK `users`, nullable),
+  `website_id` (FK `websites`, nullable), `endpoint` (TEXT, UNIQUE hash), `p256dh`, `auth`,
+  `user_agent` (NULL), `enabled`, `created_at`/`updated_at`.
+- **VAPID keys** come from `config/sentinel.php` + env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT`). The **private key is never logged**.
+- New **`WebPushProvider`** implements the **same provider contract** as `EmailProvider` /
+  `TelegramProvider` (`app/Contracts/NotificationProvider.php`) and is registered in
+  `NotificationProviderRegistry`. The `IncidentEngine` is **not modified** and does not special-case
+  Web Push.
+- **Optional** Composer dependency `minishlink/web-push`; note the **PHP 8.4 constraint** when
+  selecting a compatible release.
+- A **service worker** at `public/` handles the `push` event and `notificationclick`, plus opt-in JS
+  in `resources/js/app.js`.
+- Subscription lifecycle endpoints: **`POST /admin/push/subscribe`** (auth + admin + CSRF) to
+  register, **`DELETE`** to unsubscribe.
+- Payloads are **redacted through `MessageRedactor`** before send; dedup/cooldown via the existing
+  `NotificationDispatcher` is **unchanged**.
+
+**Alternatives considered** — A vendor push service (rejected — external dependency and data
+egress); a WebSocket/SSE channel (rejected — no offline delivery, not a notification channel).
+
+**Consequences** — *Positive:* a third channel without touching incident logic; reuses suppression,
+cooldown, and delivery logging. *Negative:* optional browser-support variance; VAPID key custody is
+a new secret class (see [`SECURITY.md`](SECURITY.md) §4).
+
+**Related** — [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §7.3; [`DATABASE.md`](DATABASE.md) §3.23;
+[`SECURITY.md`](SECURITY.md) §4; ADR-010, ADR-011.
+
+---
+
+## ADR-033: Theme Light / Dark / System
+
+**Status** — Accepted (implemented; owning phase [`PLAN.md`](PLAN.md) Phase 11)
+
+**Context** — The admin UI is server-rendered Blade + Tailwind. Operators want a light/dark
+experience, with a "follow the OS" default, and without the flash-of-unstyled/wrong theme (FOUC)
+that a late-bound class swap causes.
+
+**Decision**
+
+- Tailwind v4 **class-based dark variant** via `@custom-variant dark`.
+- Persistence via **`localStorage` + cookie** (the cookie lets the server render the correct
+  `<html>` attributes on first paint).
+- **No-FOUC inline bootstrap script** in the Blade `<head>` that applies the theme before first
+  paint.
+- **`data-theme` / `.dark`** are applied to `<html>`.
+- A **three-state control** — Light / Dark / System — where **System follows
+  `prefers-color-scheme`**.
+- Design tokens are defined in **`resources/css/app.css`**.
+
+**Alternatives considered** — `prefers-color-scheme` only (rejected — no user override);
+server-side-only persistence (rejected — round-trip before paint, FOUC).
+
+**Consequences** — *Positive:* no FOUC, honours OS preference by default, explicit user control.
+*Negative:* theme state lives in two stores (localStorage + cookie) that must stay in sync.
+
+**Related** — [`ARCHITECTURE.md`](ARCHITECTURE.md) §14.2; ADR-002 (Tailwind + Alpine, no SPA).
+
+---
+
+## ADR-034: Shared UI primitives
+
+**Status** — Accepted (implemented; owning phase [`PLAN.md`](PLAN.md) Phase 11)
+
+**Context** — The admin UI repeated ad-hoc markup for form fields, confirmation dialogs, and
+pagination/page-size controls. Duplication caused inconsistent accessibility and inconsistent
+behaviour (e.g. delete confirmations that were not always modal-gated).
+
+**Decision** — Introduce reusable Blade components:
+
+- **`x-form.field`** — label + help icon with **hover tooltip AND click modal** + error + hint.
+- **`x-modal`** — Alpine-based; used by delete confirm, help, and bulk actions.
+- **`x-per-page` selector** — values **10 / 20 / 50 / 100 / All**, preserving the query string; a
+  shared **controller-side validated per-page whitelist helper** governs accepted values.
+- **Icon-button convention** for row actions, each with an accessible **`aria-label`**; **delete is
+  always gated by a confirmation modal**.
+
+**Alternatives considered** — Per-view bespoke markup (rejected — the source of the inconsistency);
+a JS component library (rejected — forbidden SPA territory, ADR-002).
+
+**Consequences** — *Positive:* consistent accessibility and confirmation behaviour; one place to
+change field/modal/page-size semantics. *Negative:* Blade component indirection for simple fields.
+
+**Amendment (Plan S2 — websites table actions + bulk operations)** — `x-modal-form` extends `x-modal`
+so a confirmation body is wrapped in a real POST/PUT/DELETE form; the websites index now uses it for
+both the per-row and the bulk delete confirmations (delete can never submit without the modal open).
+Row actions are icon-only with `aria-label` + `title`. Bulk actions use fixed-path RESTish routes
+`POST /admin/websites/bulk/{enable,disable,delete}` (the literal `bulk` segment guarantees it can
+never be read as a `{website}` id), validated by `BulkWebsiteActionRequest` (bounded id array,
+integer members). Bulk delete soft-deletes `websites` and relies on retention for telemetry, so no FK
+is orphaned and append-only incident history is preserved. The manual run-check route
+`POST /admin/websites/{website}/check` dispatches [`RunWebsiteCheck`](app/Jobs/RunWebsiteCheck.php)
+only — never an inline probe (AGENTS.md §9).
+
+**Related** — [`ARCHITECTURE.md`](ARCHITECTURE.md) §14.3; ADR-002; [`PRD.md`](PRD.md) §7.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions

@@ -74,7 +74,8 @@
         </table>
     </div>
 
-    <div class="mt-4">
-        {{ $logs->links() }}
+    <div class="mt-4 flex items-center justify-between gap-4">
+        <x-per-page />
+        <div>{{ $logs->links() }}</div>
     </div>
 </x-admin-layout>

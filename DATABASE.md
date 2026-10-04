@@ -29,8 +29,8 @@
 `users`, `password_reset_tokens`, `sessions`, `websites`, `website_baselines`, `checks`,
 `check_extractions`, `detection_rules`, `website_rule_settings`, `incidents`, `incident_events`,
 `snapshots`, `notification_channels`, `website_notification_channel`, `notification_logs`,
-`notification_cooldowns`, `settings`, `status_page_settings`, `audit_logs`, `jobs`,
-`failed_jobs`, `cache`, `cache_locks`.
+`notification_cooldowns`, `status_pages`, `push_subscriptions`, `settings`,
+`status_page_settings`, `audit_logs`, `jobs`, `failed_jobs`, `cache`, `cache_locks`.
 
 `personal_access_tokens` — **N/A**: SiteSentinel is session-based admin-only (see
 `DECISIONS.md` ADR-018) and does not expose an API at MVP, so no token table is required.
@@ -151,6 +151,7 @@ Purpose: monitored websites and their monitoring configuration/state.
 | `monitor_content` | TINYINT(1) | no | 1 | content family toggle |
 | `monitor_security` | TINYINT(1) | no | 1 | security checks on/off |
 | `current_baseline_id` | BIGINT UNSIGNED | yes | NULL | FK current baseline |
+| `status_page_id` | BIGINT UNSIGNED | yes | NULL | FK status page; NULL falls back to default page (Phase 11) |
 | `status_availability` | ENUM('UP','DOWN') | yes | NULL | snapshot |
 | `status_security` | ENUM('OK','INFO','SUSPECT','INCIDENT') | yes | NULL | snapshot |
 | `last_checked_at` | TIMESTAMP | yes | NULL | snapshot |
@@ -163,6 +164,7 @@ Purpose: monitored websites and their monitoring configuration/state.
 | `deleted_at` | TIMESTAMP | yes | NULL | soft delete |
 
 Keys/indexes: PK `id`; FK `current_baseline_id` -> `website_baselines.id`;
+FK `status_page_id` -> `status_pages.id` ON DELETE SET NULL;
 `idx_websites_next_check_at` (`next_check_at`); `idx_websites_is_active_next_check_at`
 (`is_active`,`next_check_at`); `idx_websites_locked_at` (`locked_at`); `uq_websites_url` (`url`,
 **decision: enforce unique normalized URL** — see §7 Data Integrity);
@@ -383,7 +385,7 @@ Purpose: configured delivery channels.
 | Column | Type | Null | Default |
 | --- | --- | --- | --- |
 | `id` | BIGINT UNSIGNED | no | auto |
-| `type` | ENUM('email','telegram') | no | — |
+| `type` | ENUM('email','telegram','browser_push') | no | — |
 | `name` | VARCHAR(255) | no | — |
 | `enabled` | TINYINT(1) | no | 1 |
 | `config` | JSON | yes | NULL |
@@ -392,8 +394,9 @@ Purpose: configured delivery channels.
 | `deleted_at` | TIMESTAMP | yes | NULL |
 
 Notes: `config` holds **non-secret** settings (e.g. sender address, chat id); `secret_ref` holds an
-**encrypted** provider secret (SMTP password, Telegram bot token). `type` is extensible to
-WhatsApp/Webhook later without schema change.
+**encrypted** provider secret (SMTP password, Telegram bot token). `browser_push` is a `type` value
+whose subscription material lives in `push_subscriptions`; VAPID keys are environment/config, not
+row columns. `type` remains extensible to WhatsApp/Webhook later without schema change.
 Keys/indexes: PK `id`; `idx_notification_channels_type_enabled` (`type`,`enabled`).
 
 ### 3.14 `website_notification_channel`
@@ -488,13 +491,19 @@ separately for clarity.
 
 Keys/indexes: PK `id`; `uq_status_page_settings_slug` (`slug`).
 
-**Singleton.** This table holds a single logical row (id = 1). `StatusPageSetting::singleton()`
+**Singleton (superseded).** This table holds a single logical row (id = 1). `StatusPageSetting::singleton()`
 resolves it via `firstOrCreate(['id' => 1], [...])`, creating a `Private`/no-password/no-branding row
 on first access — there is no seeder dependency. The Phase 8 migration
 (`0001_08_01_000000_create_status_page_settings_table.php`) creates the table verbatim to this
 section and adds a MySQL `CHECK (visibility_mode IN ('Private','Public','Password Protected'))`
 constraint (best-effort on SQLite). `password_hash` is a one-way hash and is in the model's
 `$hidden` list.
+
+**Phase 11 — superseded by `status_pages`.** The singleton model is replaced by the multi-row
+**`status_pages`** table (§3.22) per [`DECISIONS.md`](DECISIONS.md) `ADR-031`. The migration is
+**additive and data-preserving**: the existing single row is migrated into one **default**
+`status_pages` row. This table is retained for one release for rollback safety; no new column is
+added to it.
 
 ### 3.19 `audit_logs`
 
@@ -532,6 +541,66 @@ primary cache/lock store is Redis). Noted for completeness.
 
 `cache`: `key` (PK), `value`, `expiration`.
 `cache_locks`: `key` (PK), `owner`, `expiration`.
+
+### 3.22 `status_pages`
+
+Purpose: multiple independently-configured public status pages (Phase 11, [`DECISIONS.md`](DECISIONS.md)
+`ADR-031`). Replaces the singleton `status_page_settings` (§3.18). A `websites` row points at a page
+via `websites.status_page_id`; a website with `status_page_id IS NULL` falls back to the row with
+`is_default = 1`.
+
+| Column | Type | Null | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `id` | BIGINT UNSIGNED | no | auto | PK |
+| `name` | VARCHAR(255) | no | — | admin-facing label |
+| `slug` | VARCHAR(191) | no | — | public URL segment; UNIQUE |
+| `is_default` | TINYINT(1) | no | 0 | the fallback page for unassigned websites |
+| `visibility_mode` | ENUM('Private','Public','Password Protected') | no | `Private` | per-page visibility |
+| `password_hash` | VARCHAR(255) | yes | NULL | one-way hash; in `$hidden` |
+| `created_by` | BIGINT UNSIGNED | yes | NULL | FK `users.id` |
+| `created_at`/`updated_at` | TIMESTAMP | yes | NULL | standard |
+
+Keys/indexes: PK `id`; `uq_status_pages_slug` (`slug`); FK `created_by` -> `users.id`
+ON DELETE SET NULL (an Admin's deletion does not delete the page);
+`idx_status_pages_is_default` (`is_default`).
+
+Notes: `password_hash` is a one-way hash and **never** reversible ([`SECURITY.md`](SECURITY.md) §4).
+Exactly one row SHOULD have `is_default = 1`; the default row is the target of the legacy `/status`
+redirect. Redaction boundary ([`STATUS-PAGE.md`](STATUS-PAGE.md) §4) is enforced identically per page.
+
+### 3.23 `push_subscriptions`
+
+Purpose: Web Push subscription material for the **Browser Push** notification channel (Phase 11,
+[`DECISIONS.md`](DECISIONS.md) `ADR-032`). One row per registered browser subscription.
+
+| Column | Type | Null | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `id` | BIGINT UNSIGNED | no | auto | PK |
+| `user_id` | BIGINT UNSIGNED | yes | NULL | FK `users.id`; NULL = unowned/admin-wide |
+| `website_id` | BIGINT UNSIGNED | yes | NULL | FK `websites.id`; NULL = all-website subscription |
+| `endpoint` | TEXT | no | — | push service endpoint; a UNIQUE hash index is computed over it |
+| `p256dh` | TEXT | yes | NULL | client public key material |
+| `auth` | TEXT | yes | NULL | client auth secret material |
+| `user_agent` | TEXT | yes | NULL | UA at registration (diagnostics) |
+| `enabled` | TINYINT(1) | no | 1 | send on/off |
+| `created_at`/`updated_at` | TIMESTAMP | yes | NULL | standard |
+
+Keys/indexes: PK `id`; FKs `user_id` -> `users.id` ON DELETE CASCADE,
+`website_id` -> `websites.id` ON DELETE CASCADE; unique hash index `uq_push_subscriptions_endpoint_hash`
+over the `endpoint` hash (MySQL `TEXT` cannot be uniquely indexed directly, so the migration stores a
+deterministic hash column/index backing this constraint); `idx_push_subscriptions_enabled`
+(`enabled`).
+
+Implementation note: the deterministic hash column is `endpoint_hash` (SHA-256 of the raw endpoint),
+added alongside `endpoint` and carrying the `uq_push_subscriptions_endpoint_hash` unique constraint. The
+raw `endpoint`/`p256dh`/`auth` columns are stored encrypted (model casts) and are never queried as
+lookup keys. `notification_channels.type` gains the `browser_push` value; on MySQL this is an explicit
+`ENUM` alter, while SQLite (local dev/test, ADR-022) rebuilds the column via `change()`.
+
+Notes: `endpoint`, `p256dh`, and `auth` are **subscription secrets** — never logged and never placed
+in a notification payload ([`SECURITY.md`](SECURITY.md) §4). VAPID keys are **not** stored here; they
+live in `config/sentinel.php` + env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`).
+Payloads are redacted through `MessageRedactor` before send.
 
 ---
 
@@ -572,6 +641,9 @@ expected growth (§6).
 | Incident list by status/time | `idx_incidents_status_detected_at` |
 | Status page aggregation | `idx_checks_website_started_at` + `websites.status_availability` snapshot |
 | Status page publish filter | `idx_websites_visible_status` (`is_active`,`is_visible_on_status`) — Phase 8 projector row selection |
+| Status page by slug | `uq_status_pages_slug` (`slug`) — Phase 11 per-page routing |
+| Website to status page assignment | `idx_websites_status_page_id` (`status_page_id`) — Phase 11 page scoping |
+| Push subscription lookup | `uq_push_subscriptions_endpoint_hash` (hash of `endpoint`) + `idx_push_subscriptions_enabled` (`enabled`) — Phase 11 dispatch |
 | Status page response band | latest `checks.duration_ms` by `idx_checks_website_started_at` (per published website) |
 | Notification dedupe lookup | `idx_notification_logs_dedupe_key` + `uq_notification_cooldowns_key` |
 | Retention pruning | `idx_checks_created_at`, `idx_incidents_created_at`, `idx_notification_logs_created_at`, `idx_snapshots_expires_at` |
@@ -626,5 +698,8 @@ Ordering the future agent will follow:
    `notification_cooldowns`.
 7. `settings`, `status_page_settings`, `audit_logs`.
 8. Seed `detection_rules` and default `settings` values (retention + thresholds).
+9. **Phase 11 (additive).** `status_pages`, then add `websites.status_page_id` FK (ON DELETE
+   SET NULL), then `push_subscriptions`; migrate the existing `status_page_settings` singleton into
+   one default `status_pages` row (data-preserving; never destructive).
 
 This ordering respects FK dependencies so every migration can run forward on a clean MySQL 8.

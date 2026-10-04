@@ -11,6 +11,10 @@ use Illuminate\Support\Carbon;
 /**
  * Status page configuration singleton (DATABASE.md §3.18).
  *
+ * @deprecated Phase 11 (ADR-031) — superseded by {@see StatusPage}. The table
+ * is retained for one release for rollback safety; do NOT use this model for
+ * new code. Use `StatusPage` (per page) instead.
+ *
  * @property int $id
  * @property string $visibility_mode
  * @property string|null $password_hash

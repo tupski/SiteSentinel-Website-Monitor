@@ -65,6 +65,7 @@ VERSION       documentation phase = 0.1.0
 | 8 | Public Status Page | Deliver `/status` in three visibility modes with the redaction boundary enforced. | Phase 6, Phase 7 | M |
 | 9 | Security Hardening | Deliver final SSRF defence-in-depth, limit/rate-limit audits, secret management, Nginx/TLS, and retention pruning. | Phase 4, Phase 5, Phase 8 | L |
 | 10 | Testing & Production Readiness | Deliver full test suite, load profiling, observability, backup/restore, release runbook, and 0.1.0 -> 1.0.0 plan. | Phase 9 | L |
+| 11 | Post-Release Feature Set | Deliver multiple status pages, Browser Push, theme, manual check trigger, and shared UI primitives (additive; does not renumber Phases 0–10). | Phase 10 | L |
 
 ### 2.1 Phase dependency graph
 
@@ -83,6 +84,7 @@ flowchart TD
     P5 --> P9
     P8 --> P9
     P9 --> P10[Phase 10 Testing and Production Readiness]
+    P10 --> P11[Phase 11 Post-Release Feature Set]
 ```
 
 ---
@@ -1163,6 +1165,79 @@ None expected. If a profiling/index change is required, add a migration and upda
 
 ---
 
+## Phase 11 — Post-Release Feature Set
+
+> **Additive.** Phase 11 does **not** renumber Phases 0–10 and does not change the MVP
+> boundary. It delivers the feature set designed in [`DECISIONS.md`](DECISIONS.md) `ADR-031`–`ADR-034`
+> (implemented as Plans S1–S6; see [`CHANGELOG.md`](CHANGELOG.md)).
+
+### Objective
+
+Deliver multiple status pages, the Browser Push notification channel, the three-state theme, a manual
+check trigger, and the shared UI primitives — all additively, leaving Phases 0–10 unchanged.
+
+### Scope
+
+- **Multiple status pages (`ADR-031`).** New `status_pages` table ([`DATABASE.md`](DATABASE.md)
+  §3.22); `websites.status_page_id` FK (nullable, `ON DELETE SET NULL`); migrate the single
+  `status_page_settings` row into one default `status_pages` row (data-preserving). Public routing at
+  `/status/{slug}` with a `302` redirect from legacy `/status`; per-page unlock
+  (`status_unlock.{page_id}`); `StatusPageCache` keyed by page id; per-page redaction boundary. Admin
+  CRUD at `/admin/status-pages` behind auth + admin.
+- **Browser Push (`ADR-032`).** New `push_subscriptions` table; `WebPushProvider` implementing the
+  provider contract and registered in `NotificationProviderRegistry` (no `IncidentEngine` change);
+  VAPID keys via `config/sentinel.php` + env (`VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT`);
+  optional `minishlink/web-push` (PHP 8.4-aware); service worker in `public/` + opt-in JS in
+  `resources/js/app.js`; `POST /admin/push/subscribe` and `DELETE` unsubscribe; payloads redacted and
+  delivery logged.
+- **Theme (`ADR-033`).** Tailwind v4 `@custom-variant dark`; `localStorage` + cookie; no-FOUC inline
+  bootstrap; `data-theme`/`.dark` on `<html>`; three-state Light/Dark/System; tokens in
+  `resources/css/app.css`.
+- **Shared UI primitives (`ADR-034`).** `x-form.field`, `x-modal`, `x-per-page` selector with a
+  validated whitelist helper, icon-button convention, modal-gated deletes.
+- **Manual check trigger (`FR-103`).** Admin-triggered check outside cadence, rate-limited.
+
+**Out of scope for this phase:**
+
+- Any renumbering of Phases 0–10.
+- Destructive migrations — the status-page migration is **additive and data-preserving**.
+
+### Prerequisites / Depends on
+
+- `Phase 10` — MVP complete and released.
+
+### Tests Required
+
+| Test | Type | Mandatory |
+| --- | --- | --- |
+| Per-page slug routing + legacy `302` redirect | Feature | Yes |
+| Per-page visibility gate + per-page unlock isolation | Security | Yes |
+| Per-page redaction regression | Security | Yes |
+| Browser Push provider contract + redaction + suppression unchanged | Feature/Security | Yes |
+| VAPID/push-secret no-log assertions | Security | Yes |
+| Theme no-FOUC + System follows `prefers-color-scheme` | Feature | Yes |
+| Per-page selector whitelist + query-string preservation | Feature | Yes |
+| Modal-gated delete + icon-button aria-label | Feature | Yes |
+
+### Acceptance Criteria
+
+- [x] `AC-25` Multiple status pages with unique slugs and per-page visibility; `/status/{slug}` served; legacy `/status` `302`.
+- [x] `AC-26` Page assignment via `websites.status_page_id` with default-page fallback; per-page redaction holds.
+- [x] `AC-27` Per-page unlock keyed `status_unlock.{page_id}`; unlocking one page does not unlock another.
+- [x] `AC-28` Browser Push delivered via the provider-independent dispatcher; unsubscribe stops delivery; no secret logged or in a payload.
+- [x] `AC-29` Light / Dark / System theme, persisted, System follows OS, no theme flash.
+- [x] `AC-30` Per-page selector 10/20/50/100/All preserving query string; out-of-whitelist values rejected.
+- [x] `AC-31` Delete gated by a confirmation modal; icon-only actions carry an accessible label.
+
+### Definition of Done
+
+- [x] `AC-25` ... `AC-31` met.
+- [ ] Phases 0–10 unrenumbered and still green; no regression.
+- [ ] Schema additions are additive; existing status-page settings preserved.
+- [ ] `CHANGELOG.md` updated.
+
+---
+
 ## 3. Cross-Phase Traceability
 
 Maps [`PRD.md`](PRD.md) requirement IDs to the delivering phase(s).
@@ -1179,6 +1254,7 @@ Maps [`PRD.md`](PRD.md) requirement IDs to the delivering phase(s).
 | `FR-77`–`FR-83` (status page, visibility) | Phase 8 |
 | `FR-84`–`FR-101` (retention, observability, hardening) | Phase 9 (retention/security), Phase 10 (observability validation) |
 | `FR-102` (metrics export) | Post-MVP Backlog |
+| `FR-103`–`FR-109` (manual check, theme, browser push, per-page selector, delete modal, multiple status pages, field help) | Phase 11 |
 | `NFR-01`–`NFR-06` (performance, capacity) | Phase 10 (validated), shaped by Phase 4 |
 | `NFR-07`–`NFR-12` (isolation, reliability) | Phase 4, Phase 7 |
 | `NFR-13`–`NFR-19` (security posture) | Phase 9 |
@@ -1195,6 +1271,7 @@ Maps [`PRD.md`](PRD.md) requirement IDs to the delivering phase(s).
 | `AC-19` | Phase 9 |
 | `AC-20`–`AC-21` | Phase 10 |
 | `AC-23`–`AC-24` | Phase 0–1 (stack), Phase 10 (validation) |
+| `AC-25`–`AC-31` | Phase 11 |
 
 Rule catalogue `RULE-AV-`, `RULE-SSL-`, `RULE-RED-`, `RULE-CNT-`, `RULE-KW-`, `RULE-LNK-`, and `RULE-SEO-` (seven categories) are owned by [`DETECTION-RULES.md`](DETECTION-RULES.md) and delivered in Phase 5.
 
@@ -1202,7 +1279,7 @@ Rule catalogue `RULE-AV-`, `RULE-SSL-`, `RULE-RED-`, `RULE-CNT-`, `RULE-KW-`, `R
 
 ## 4. Post-MVP Backlog
 
-Deferred items, each tagged with a suggested future phase. These are **not** in the MVP and must not be built during Phases 0–10.
+Deferred items, each tagged with a suggested future phase. These are **not** in the MVP and must not be built during Phases 0–10. Items tagged **Phase 11** are the post-release feature set ([`DECISIONS.md`](DECISIONS.md) `ADR-031`–`ADR-034`); they are additive and do not renumber Phases 0–10.
 
 | Deferred item | Suggested future phase | Source |
 | --- | --- | --- |
@@ -1216,7 +1293,12 @@ Deferred items, each tagged with a suggested future phase. These are **not** in 
 | ML-based anomaly detection | Future Phase D | [`PRD.md`](PRD.md) §18 |
 | Time-series metrics export | Future Phase D | [`PRD.md`](PRD.md) `FR-102` |
 | Bulk import (CSV) / grouping & tagging | Future Phase B | [`PRD.md`](PRD.md) `FR-16` |
+| Multiple status pages | Phase 11 | [`PRD.md`](PRD.md) `FR-108`; [`DECISIONS.md`](DECISIONS.md) `ADR-031` |
+| Browser Push notification channel | Phase 11 | [`PRD.md`](PRD.md) `FR-105`; [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §7.3 |
+| Light / Dark / System theme | Phase 11 | [`PRD.md`](PRD.md) `FR-104`; [`DECISIONS.md`](DECISIONS.md) `ADR-033` |
+| Manual check trigger | Phase 11 | [`PRD.md`](PRD.md) `FR-103` |
+| Per-page selector, bulk actions, field help | Phase 11 | [`PRD.md`](PRD.md) `FR-106`, `FR-107`, `FR-109`; [`DECISIONS.md`](DECISIONS.md) `ADR-034` |
 
 ---
 
-*End of `PLAN.md` — specification only; implementation roadmap for Phases 0–10.*
+*End of `PLAN.md` — specification only; implementation roadmap for Phases 0–11.*

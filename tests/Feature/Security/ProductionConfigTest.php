@@ -44,9 +44,12 @@ final class ProductionConfigTest extends SecurityTestCase
     {
         // PRD §22 fixes the public surface: /, /admin, /status (+health),
         // with the authenticated logout and the guest password-reset flow.
+        // Phase 11 (ADR-031) serves each page at /status/{slug}.
         $allowed = [
             '', '/', 'health', 'up',
-            'status', 'status.json', 'status/unlock', 'status/logout',
+            'status', 'status.json',
+            'status/{statusPage}', 'status/{statusPage}.json',
+            'status/{statusPage}/unlock', 'status/{statusPage}/logout',
             'logout', 'storage/{path}',
         ];
 

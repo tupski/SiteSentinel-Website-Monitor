@@ -6,7 +6,9 @@ namespace App\Services\StatusPage;
 
 use App\Models\Check;
 use App\Models\Incident;
+use App\Models\StatusPage;
 use App\Models\Website;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -15,21 +17,19 @@ use Illuminate\Support\Collection;
  *
  * Reads website snapshots + open incident severity only. Never touches
  * URLs, IPs, keywords, domains, rules, scores, snapshots, headers.
+ *
+ * Projects a SINGLE {@see StatusPage}: a page never exposes another page's
+ * websites (ADR-031). A website with `status_page_id IS NULL` belongs to the
+ * default page only.
  */
 final class StatusProjector
 {
-    public function project(?Carbon $now = null): PublicStatusDTO
+    public function project(StatusPage $page, ?Carbon $now = null): PublicStatusDTO
     {
         $now ??= Carbon::now('UTC');
 
         /** @var Collection<int, Website> $websites */
-        $websites = Website::query()
-            ->where('is_active', true)
-            ->where('is_visible_on_status', true)
-            ->orderBy('status_alias')
-            ->orderBy('name')
-            ->orderBy('id')
-            ->get();
+        $websites = $this->publishedQuery($page)->get();
 
         $openSeverities = $this->openSeverities($websites);
 
@@ -64,6 +64,33 @@ final class StatusProjector
             services: $services,
             updatedDayBucket: $now->copy()->setTimezone('UTC')->format('Y-m-d'),
         );
+    }
+
+    /**
+     * Websites that belong to exactly this page. The default page also owns
+     * every website without an explicit assignment; a non-default page only
+     * owns its explicitly-assigned websites.
+     *
+     * @return Builder<Website>
+     */
+    public function publishedQuery(StatusPage $page): Builder
+    {
+        $query = Website::query()
+            ->where('is_active', true)
+            ->where('is_visible_on_status', true);
+
+        if ($page->is_default) {
+            $query->where(function (Builder $q) use ($page): void {
+                $q->where('status_page_id', $page->id)->orWhereNull('status_page_id');
+            });
+        } else {
+            $query->where('status_page_id', $page->id);
+        }
+
+        return $query
+            ->orderBy('status_alias')
+            ->orderBy('name')
+            ->orderBy('id');
     }
 
     /**

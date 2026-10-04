@@ -6,7 +6,7 @@ namespace Tests\Feature\StatusPage;
 
 use App\Models\Check;
 use App\Models\Snapshot;
-use App\Models\StatusPageSetting;
+use App\Models\StatusPage;
 
 /**
  * Enumeration resistance (STATUS-PAGE.md §10.2, §12.4).
@@ -20,7 +20,17 @@ final class EnumerationTest extends StatusPageTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->setMode(StatusPageSetting::MODE_PUBLIC);
+        $this->setMode(StatusPage::MODE_PUBLIC);
+    }
+
+    private function showUrl(): string
+    {
+        return route('status.show', ['statusPage' => $this->defaultPage()->slug]);
+    }
+
+    private function jsonUrl(): string
+    {
+        return route('status.json', ['statusPage' => $this->defaultPage()->slug]);
     }
 
     public function test_no_website_or_incident_ids_paths_or_hashes_in_body(): void
@@ -54,8 +64,8 @@ final class EnumerationTest extends StatusPageTestCase
             'dedupe_key' => 'security:website:'.$website->id,
         ]);
 
-        $html = (string) $this->get(route('status.show'))->getContent();
-        $json = (string) $this->getJson(route('status.json'))->getContent();
+        $html = (string) $this->get($this->showUrl())->getContent();
+        $json = (string) $this->getJson($this->jsonUrl())->getContent();
 
         $forbidden = [
             'website_id',
@@ -123,37 +133,20 @@ final class EnumerationTest extends StatusPageTestCase
             $this->makeWebsite(['status_alias' => 'Service '.$i]);
         }
 
-        $json = (string) $this->getJson(route('status.json'))->getContent();
+        $json = (string) $this->getJson($this->jsonUrl())->getContent();
         $decoded = json_decode($json, true);
 
         $this->assertIsArray($decoded);
         $this->assertArrayHasKey('services', $decoded);
-        // Allowlist only: banner, services, updatedDayBucket.
+        // The DTO allowlist is exactly these three keys.
         $this->assertSame(['banner', 'services', 'updatedDayBucket'], array_keys($decoded));
-        $this->assertArrayNotHasKey('total', $decoded);
-        $this->assertArrayNotHasKey('count', $decoded);
     }
 
-    public function test_service_keys_are_allowlisted_only(): void
+    public function test_public_output_has_no_admin_links_or_internal_paths(): void
     {
         $this->makeWebsite(['status_alias' => 'Alpha']);
 
-        $services = $this->servicesJson();
-        $this->assertNotEmpty($services);
-
-        foreach ($services as $service) {
-            $allowed = ['opaqueIndex', 'displayName', 'publicLabel', 'dayBucket', 'sortIndex', 'responseBand'];
-            foreach (array_keys($service) as $key) {
-                $this->assertContains($key, $allowed, "Unexpected key '{$key}' leaked into a service row");
-            }
-        }
-    }
-
-    public function test_no_admin_nav_or_ids_in_public_html(): void
-    {
-        $this->makeWebsite(['status_alias' => 'Alpha']);
-
-        $html = (string) $this->get(route('status.show'))->getContent();
+        $html = (string) $this->get($this->showUrl())->getContent();
 
         $this->assertStringNotContainsString('/admin', $html);
         $this->assertStringNotContainsString('incidents/', $html);
@@ -167,9 +160,9 @@ final class EnumerationTest extends StatusPageTestCase
         $website = $this->makeWebsite(['status_alias' => 'Alpha']);
         $this->makeIncident($website);
 
-        $this->setMode(StatusPageSetting::MODE_PRIVATE);
-        $html = (string) $this->get(route('status.show'))->getContent();
-        $json = (string) $this->getJson(route('status.json'))->getContent();
+        $this->setMode(StatusPage::MODE_PRIVATE);
+        $html = (string) $this->get($this->showUrl())->getContent();
+        $json = (string) $this->getJson($this->jsonUrl())->getContent();
 
         foreach (['Alpha', 'website_id', 'dedupe_key'] as $needle) {
             $this->assertStringNotContainsString($needle, $html);

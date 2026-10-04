@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use App\Services\Security\SsrfUrlValidator;
+use App\Support\HttpStatusCodes;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -24,7 +25,7 @@ abstract class WebsiteRequest extends FormRequest
             'url' => ['required', 'string', 'max:2048'],
             'check_interval_seconds' => ['required', 'integer', 'min:60'],
             'timeout_seconds' => ['required', 'integer', 'min:3', 'max:30'],
-            'expected_status' => ['required', 'integer', 'between:100,599'],
+            'expected_status' => ['required', 'integer', 'in:'.HttpStatusCodes::allowedRule()],
             'expected_title' => ['nullable', 'string', 'max:512'],
             'expected_final_domain' => ['nullable', 'string', 'max:255'],
             'follow_redirects' => ['sometimes', 'boolean'],

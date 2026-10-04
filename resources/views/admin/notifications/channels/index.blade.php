@@ -1,8 +1,8 @@
 <x-admin-layout>
-    <x-slot name="title">{{ __('Notification channels') }} — SiteSentinel</x-slot>
+    <x-slot name="title">{{ __('Notification') }} — SiteSentinel</x-slot>
 
     <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-2xl font-bold tracking-tight">{{ __('Notification channels') }}</h1>
+        <h1 class="text-2xl font-bold tracking-tight">{{ __('Notification') }}</h1>
         <a href="{{ route('admin.notifications.create') }}" class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
             {{ __('Add channel') }}
         </a>
@@ -53,6 +53,11 @@
             </tbody>
         </table>
     </div>
+
+    @include('admin.notifications.channels._push', [
+        'pushPublicKey' => $pushPublicKey ?? '',
+        'pushEnabled' => $pushEnabled ?? false,
+    ])
 
     <div class="mt-4">
         <a href="{{ route('admin.notification-logs.index') }}" class="text-sm text-slate-600 underline hover:text-slate-900">{{ __('View delivery log') }}</a>

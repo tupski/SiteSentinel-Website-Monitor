@@ -25,26 +25,55 @@
 
 ### 1.1 What this document is
 
-`STATUS-PAGE.md` is the exhaustive specification of the SiteSentinel public status page served at
-**`/status`**: its three visibility modes, the password-protected unlock flow, the **redaction
-boundary** that separates admin data from public data, the public service-status model and its
-derivation, incident presentation, layout and caching, abuse/privacy considerations, admin controls,
-and the acceptance tests that prove no sensitive data ever reaches the public response.
+`STATUS-PAGE.md` is the exhaustive specification of the SiteSentinel public status page. At Phase 8
+it is served at **`/status`**; from Phase 11 (designed, §1.4) it is served per page at
+**`/status/{slug}`** with `302` redirect from the legacy **`/status`**. Its three visibility modes
+(now per page), the password-protected unlock flow, the **redaction boundary** that separates admin
+data from public data, the public service-status model and its derivation, incident presentation,
+layout and caching, abuse/privacy considerations, admin controls, and the acceptance tests that
+prove no sensitive data ever reaches the public response.
 
 ### 1.2 Relationship to sibling documents
 
 | Document | Authority over the status page | What it owns |
 | --- | --- | --- |
 | [`PRD.md`](PRD.md) §14 | **Authoritative** | Visibility modes (`FR-78`), what may be shown publicly (`FR-79`, `FR-82`), what is admin-only (`FR-80`), the public-exposure prohibition (`§14.4`), visibility toggle + per-website inclusion (`FR-83`). |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) §10 | Derived | The `GET /status` flow and its branch on `status_page_settings.visibility_mode`. |
-| [`DATABASE.md`](DATABASE.md) | **Authoritative for names** | `status_page_settings`, `websites.status_availability` / `.status_security`, `incidents`, `checks` columns. |
-| [`SECURITY.md`](SECURITY.md) §4 | **Authoritative for secrets** | `status_page_settings.password_hash` is hashed (never reversible); no secrets in output. |
-| [`DECISIONS.md`](DECISIONS.md) | Derived | Rationale: `ADR-013` (visibility model + public information redaction). |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) §10 | Derived | The `GET /status/{slug}` flow and its branch on `status_pages.visibility_mode`. |
+| [`DATABASE.md`](DATABASE.md) | **Authoritative for names** | `status_pages`, `status_page_settings`, `websites.status_page_id` / `.status_availability` / `.status_security`, `incidents`, `checks` columns. |
+| [`SECURITY.md`](SECURITY.md) §4 | **Authoritative for secrets** | `status_pages.password_hash` is hashed (never reversible); no secrets in output. |
+| [`DECISIONS.md`](DECISIONS.md) | Derived | Rationale: `ADR-013` (visibility model + public information redaction), `ADR-031` (multiple status pages). |
 | [`NOTIFICATIONS.md`](NOTIFICATIONS.md) | Sibling | Notification payloads are admin-facing and MUST NOT be reused for public rendering. |
 | **`STATUS-PAGE.md`** (this file) | **Authoritative for presentation** | Layout, caching, visibility-mode implementation, redaction enforcement. |
 
 If this document contradicts [`PRD.md`](PRD.md) on a product-level requirement, [`PRD.md`](PRD.md)
 wins and this document must be fixed.
+
+### 1.4 Multiple status pages (Phase 11 — designed, not yet implemented)
+
+> **Planned, additive extension.** [`DECISIONS.md`](DECISIONS.md) `ADR-031` converts the singleton
+> status page into a **multi-row** model. Everything in this document remains authoritative for
+> **presentation**; this subsection records what changes for multiple pages. Until Phase 11 is
+> implemented, the singleton behaviour of §2–§13 is what exists.
+
+- Pages are stored in **`status_pages`** ([`DATABASE.md`](DATABASE.md) §3.22): `id`, `name`,
+  `slug` (UNIQUE), `is_default`, `visibility_mode`, `password_hash` (NULL), `created_by`
+  (FK `users`), timestamps.
+- **Visibility mode is per page** — each page carries its own `visibility_mode`
+  (`Private` / `Public` / `Password Protected`); the singleton column
+  `status_page_settings.visibility_mode` becomes the default page's column.
+- A website is assigned to a page via **`websites.status_page_id`** (nullable, `ON DELETE SET
+  NULL`). A website with `status_page_id IS NULL` **falls back to the default page**
+  (`status_pages.is_default = 1`).
+- The **public URL becomes `/status/{slug}`**; the legacy **`/status`** responds `302` redirect to
+  the default page's slug.
+- The **unlock session is keyed per page**: `status_unlock.{page_id}` (§3.2). Unlocking one page
+  does not unlock another.
+- `StatusPageCache` is **keyed per page** — the page id is part of the cache key (§9.2).
+- The **redaction boundary (§4) is unchanged and enforced per page**, independently for every page.
+- **Public labels (§5.2) are unchanged** — the derivation table, staleness rules, and the §14.4
+  prohibition apply identically to every page.
+- Admin CRUD lives at **`/admin/status-pages`** (`index`/`create`/`store`/`edit`/`update`/
+  `destroy`) behind **auth + admin** (§11.4).
 
 ### 1.3 The two hard rules
 
@@ -77,6 +106,14 @@ flowchart TD
     Unlock -- yes --> Agg
     Agg --> Render[Render public projection]
 ```
+
+### 2.0 Per-page visibility (Phase 11, `ADR-031`)
+
+> **Planned, additive.** Visibility mode becomes a **per-page** property: each `status_pages` row
+> carries its own `visibility_mode` ([`DATABASE.md`](DATABASE.md) §3.22). A website resolves to the
+> page via `websites.status_page_id`, falling back to the default page when NULL. The mode
+> semantics below (Private / Public / Password Protected) are unchanged; only their scope moves from
+> "the singleton" to "the addressed page".
 
 ### 2.1 Mode-by-mode behaviour
 
@@ -136,6 +173,10 @@ spec, [`PRD.md`](PRD.md) §14.1, and the `status_page_settings.visibility_mode` 
   session skip the password form.
 - The unlock is scoped to the **status page**, not to `/admin`. It grants no admin capability.
 - Session cookies use `Secure`/`HttpOnly`/`SameSite` flags (`NFR-11`).
+- **Per page (Phase 11, `ADR-031`).** With multiple pages, the unlock is keyed **per page** as
+  `status_unlock.{page_id}`; a successful unlock of one page MUST NOT unlock any other page, and
+  each page's `password_hash` and `updated_at` stamp are compared independently. The legacy
+  singleton key applies to the default page only.
 
 **Implemented session-flag shape (Phase 8, `ADR-029`).** `App\Services\StatusPage\VisibilityGate`
 and `StatusPageUnlockService` write three session keys on a successful unlock:
@@ -215,6 +256,11 @@ All three visibility modes render through a **single public-safe projection**
 that strips security detail, rule names, scores, technical metadata, and snapshot artifacts"). Even
 `Private` mode renders the public projection, so promotion to `Public` cannot accidentally expose
 more than was tested.
+
+> **Per page (Phase 11, `ADR-031`).** The redaction boundary is enforced **independently per page** —
+> each `status_pages` projection runs the same §4.1 field-level boundary and the same §4.2
+> never-public prohibition. Adding pages MUST NOT weaken the boundary for any page, and no page may
+> expose another page's websites.
 
 ### 4.1 Field-level boundary
 
@@ -616,6 +662,10 @@ made by `App\Http\Middleware\EnsureStatusVisibility` (applied to the status rout
 
 ### 9.2 TTL and invalidation
 
+> **Per page (Phase 11, `ADR-031`).** With multiple pages, `StatusPageCache` keys include the
+> **page id** in addition to the visibility-mode hash and settings stamp, so a projection is never
+> served across pages. Busting one page's cache MUST NOT evict or expose another page's projection.
+
 - **TTL recommendation:** tie the cache TTL to the check cadence — a short TTL (on the order of the
   shortest published `check_interval_seconds`, floor ~60s) so the page is never meaningfully staler
   than the monitoring data behind it.
@@ -707,9 +757,9 @@ row can ever be read back out of the cache (§9.1).
 
 | Control | Stored in |
 | --- | --- |
-| Visibility mode | `status_page_settings.visibility_mode` |
-| Status-page password | `status_page_settings.password_hash` (hashed) |
-| Public slug | `status_page_settings.slug` (unique: `uq_status_page_settings_slug`) |
+| Visibility mode | `status_page_settings.visibility_mode` (Phase 11: per-row `status_pages.visibility_mode`) |
+| Status-page password | `status_page_settings.password_hash` (hashed) (Phase 11: `status_pages.password_hash`) |
+| Public slug | `status_page_settings.slug` (unique: `uq_status_page_settings_slug`) (Phase 11: `status_pages.slug`) |
 | Branding (title/logo/footer/custom message) | `status_page_settings.branding` (JSON) |
 | Which websites are listed, and their display aliases | `websites.is_visible_on_status` + `websites.status_alias` (see §11.2) |
 | Whether the page is shown at all | `visibility_mode = Private` (no public exposure) |
@@ -721,9 +771,14 @@ the frozen name `status_page_settings`.
 **Implemented per-website storage (Phase 8, `ADR-029`).** Per-website inclusion is the
 `websites.is_visible_on_status` boolean (default `0`) and the public display alias is
 `websites.status_alias` (nullable, `VARCHAR(255)`), not a separate join table. **The `slug` is
-storage-only:** it is validated (`max:191`, `alpha_dash`) and persisted on the singleton, but it is
-**not used for routing** — the page is always served at `/status` and `/status.json` — and it is not
-rendered. It exists for a future custom-path feature (`FR-84`, out of MVP scope).
+storage-only at Phase 8:** it is validated (`max:191`, `alpha_dash`) and persisted on the singleton,
+but it is **not used for routing** — the page is always served at `/status` and `/status.json` — and
+it is not rendered. It exists for a future custom-path feature (`FR-84`, out of MVP scope).
+
+> **Superseded at Phase 11 (`ADR-031`).** The `slug` becomes the **public routing key**: pages are
+> served at `/status/{slug}`, and the legacy `/status` `302` redirects to the default page's slug.
+> The routing key is `status_pages.slug` (UNIQUE, `uq_status_pages_slug`), not the Phase 8 singleton
+> column.
 
 **Implemented confirmation UX (§11.3).** The admin form requires a `confirm_public` checkbox; the
 server-side `UpdateStatusPageSettingsRequest` rejects `visibility_mode = Public` without it
@@ -731,6 +786,28 @@ server-side `UpdateStatusPageSettingsRequest` rejects `visibility_mode = Public`
 `status_page.visibility.changed` with `{from, to}` metadata. Saving any settings change advances
 `updated_at`, which invalidates the cached projection **and** every existing unlock session (§3.2,
 §9.2).
+
+### 11.4 Multiple status pages — admin CRUD (Phase 11, `ADR-031`)
+
+> **Planned, additive.** Until Phase 11 is implemented, the singleton (§11.1) applies.
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/admin/status-pages` | `GET` | `index` — list pages |
+| `/admin/status-pages/create` | `GET` | `create` — new-page form |
+| `/admin/status-pages` | `POST` | `store` — create a page |
+| `/admin/status-pages/{status_page}/edit` | `GET` | `edit` — edit form |
+| `/admin/status-pages/{status_page}` | `PUT`/`PATCH` | `update` — save a page |
+| `/admin/status-pages/{status_page}` | `DELETE` | `destroy` — delete a page |
+
+- All six routes are behind **auth + admin** ([`SECURITY.md`](SECURITY.md) §3).
+- A page is identified externally by its unique `slug`; the admin sets `name`, `slug`,
+  `visibility_mode`, `password_hash` (optional), and `is_default`.
+- Deleting a page MUST NOT delete websites: `websites.status_page_id` is `ON DELETE SET NULL`, so
+  affected websites fall back to the default page.
+- Exactly one page SHOULD remain `is_default = 1`; the default page is the target of the legacy
+  `/status` `302` redirect.
+- Each page's visibility change and delete are audited ([`SECURITY.md`](SECURITY.md) §9).
 
 ### 11.2 Per-website inclusion and aliasing
 
@@ -798,6 +875,19 @@ server-side `UpdateStatusPageSettingsRequest` rejects `visibility_mode = Public`
   consequences: "redaction logic must be regression-tested to avoid accidental leakage").
 - The test MUST cover **all three visibility modes**, since all render through the same projection.
 - This test is a **release blocker**: a failure means the §14.4 hard rule is violated.
+
+### 12.6 Per-page tests (Phase 11, `ADR-031` — planned)
+
+- **Slug routing:** `GET /status/{slug}` serves the addressed page; an unknown slug does not leak the
+  existence of other pages; legacy `GET /status` returns `302` to `/status/{default-slug}`.
+- **Page assignment:** a website with `status_page_id` appears only on that page; a NULL
+  `status_page_id` website appears on the default page only.
+- **Per-page unlock:** unlocking one `Password Protected` page does not unlock another; each page's
+  password and `updated_at` stamp revoke independently (`status_unlock.{page_id}`).
+- **Per-page cache:** the `StatusPageCache` key includes the page id; busting one page does not
+  affect another.
+- **Per-page redaction:** the §12.3 redaction regression test is run **per page**, across all
+  visibility modes — still a release blocker.
 
 ### 12.4 Additional required tests
 

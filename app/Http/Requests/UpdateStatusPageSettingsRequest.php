@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\StatusPage;
 use App\Models\StatusPageSetting;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -58,7 +59,7 @@ final class UpdateStatusPageSettingsRequest extends FormRequest
             if ($mode === StatusPageSetting::MODE_PASSWORD_PROTECTED) {
                 $clear = ! empty($data['clear_password']);
                 $pw = (string) ($data['password'] ?? '');
-                $existing = StatusPageSetting::singleton()->password_hash;
+                $existing = StatusPage::resolveDefault()->password_hash;
                 if ($clear || ($pw === '' && empty($existing))) {
                     if ($pw === '') {
                         $v->errors()->add('password', 'Password Protected mode requires a password.');

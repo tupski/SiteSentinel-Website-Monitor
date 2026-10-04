@@ -152,6 +152,18 @@ return [
         'retry_backoff_seconds' => [60, 300, 900],
     ],
 
+    'push' => [
+        // Web Push (VAPID) keys (NOTIFICATIONS.md §7.3, SECURITY.md §4, ADR-032).
+        // The PUBLIC key is exposed to the opt-in JS; the PRIVATE key is a secret
+        // and is NEVER logged, rendered, or placed in a payload.
+        'vapid_public_key' => (string) env('VAPID_PUBLIC_KEY', ''),
+        'vapid_private_key' => (string) env('VAPID_PRIVATE_KEY', ''),
+        'vapid_subject' => (string) env('VAPID_SUBJECT', ''),
+
+        // Delivery TTL (seconds) for a push message and default payload icon.
+        'ttl_seconds' => (int) env('VAPID_TTL_SECONDS', 3600),
+    ],
+
     'retention' => [
         // Check telemetry retention window in days (default 30, options 30/60/90, PRD FR-91, ADR-016)
         'checks_days' => (int) env('SENTINEL_RETENTION_CHECKS_DAYS', 30),

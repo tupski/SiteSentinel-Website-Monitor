@@ -76,5 +76,8 @@
         </table>
     </div>
 
-    <div class="mt-4">{{ $incidents->links() }}</div>
+    <div class="mt-4 flex items-center justify-between gap-4">
+        <x-per-page />
+        <div>{{ $incidents->links() }}</div>
+    </div>
 </x-admin-layout>

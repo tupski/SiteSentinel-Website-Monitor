@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\StatusPage;
 
-use App\Models\StatusPageSetting;
+use App\Models\StatusPage;
 use Illuminate\Support\Carbon;
 
 /**
@@ -18,7 +18,12 @@ final class StalenessTest extends StatusPageTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->setMode(StatusPageSetting::MODE_PUBLIC);
+        $this->setMode(StatusPage::MODE_PUBLIC);
+    }
+
+    private function jsonUrl(): string
+    {
+        return route('status.json', ['statusPage' => $this->defaultPage()->slug]);
     }
 
     public function test_fresh_within_threshold_renders_its_label(): void
@@ -127,8 +132,7 @@ final class StalenessTest extends StatusPageTestCase
 
         $this->assertSame('Operational', $this->labelFor('Ticking'));
 
-        // Advance beyond max(2*300, 300) = 600s.
-        $this->travel(11)->minutes();
+        $this->travelTo(Carbon::parse('2026-10-03 12:30:00', 'UTC'));
 
         $this->assertSame('Unknown', $this->labelFor('Ticking'));
     }
@@ -152,7 +156,7 @@ final class StalenessTest extends StatusPageTestCase
             'last_checked_at' => Carbon::now('UTC')->subSeconds(700),
         ]);
 
-        $response = $this->getJson(route('status.json'));
+        $response = $this->getJson($this->jsonUrl());
         $response->assertOk();
         // Unknown outranks Operational, so the worst label is Unknown.
         $response->assertJsonPath('banner', 'Unknown');

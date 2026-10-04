@@ -162,8 +162,10 @@ suggestions; the responsibility boundary is the binding part.
 | Scoring correlator | Aggregate signals, apply thresholds + correlation guard | per-rule signals | score, security state, incident candidate | config thresholds, rule categories | `app/Services/Detection/ScoringCorrelator.php` |
 | Incident engine | Dedupe/merge against open incident; create/transition; emit timeline events | incident candidate, open `incidents` row | `incidents`, `incident_events`, snapshot trigger | MySQL, incident state machine | `app/Services/Incidents/IncidentEngine.php` |
 | Notification dispatcher + providers | Gate (dedupe/cooldown), select channels, deliver, log | incident, channel set, cooldown state | provider call, `notification_logs` row | queue, Mail, HTTP client | `app/Services/Notifications/NotificationDispatcher.php`, `app/Services/Notifications/Channels/*`, contract `app/Contracts/NotificationProvider.php` |
+| Web Push provider (Phase 11 — planned) | Deliver a redacted payload to a registered browser subscription | incident intent, `push_subscriptions` rows, VAPID config | push service call, `notification_logs` row | `minishlink/web-push`, push service, `MessageRedactor` | `app/Services/Notifications/Channels/WebPushProvider.php`, registered in `NotificationProviderRegistry` |
 | Retention pruner | Delete rows past their retention window | retention config, current time | deleted rows, run metrics | MySQL, Redis | `model:prune` via `Prunable`/`MassPrunable` on `Check`/`Snapshot`/`NotificationLog`/`Incident`/`NotificationCooldown` (Phase 9) |
-| Status page | Render public/password-safe aggregate status | `status_page_settings`, aggregated `checks`/`incidents` | HTML, redacted public projection | MySQL, visibility gate | `app/Http/Controllers/StatusPageController.php`, `app/Services/StatusPage` |
+| Status page | Render public/password-safe aggregate status | `status_pages`, aggregated `checks`/`incidents` | HTML, redacted public projection | MySQL, visibility gate | `app/Http/Controllers/StatusPageController.php`, `app/Services/StatusPage` |
+| Status pages admin (Phase 11 — planned) | CRUD multiple `status_pages`; manage slug, visibility mode, password, default flag | authenticated admin session | HTML/Turbo responses, `status_pages` rows | MySQL, auth + admin gate | `app/Http/Controllers/Admin/StatusPageController.php`, routes `/admin/status-pages*` |
 | Admin dashboard | CRUD websites/channels/rules/settings; acknowledge/resolve incidents | authenticated admin session | HTML/Turbo responses | MySQL, auth gate, policy layer | `app/Http/Controllers/Admin/*`, `app/Policies` |
 
 ---
@@ -325,8 +327,10 @@ flowchart TD
     Select --> Fanout[Fan out per channel]
     Fanout --> EmailP[Email provider]
     Fanout --> TelegramP[Telegram provider]
+    Fanout --> PushP[WebPush provider - Phase 11]
     EmailP --> Log[notification_logs row]
     TelegramP --> Log
+    PushP --> Log
     LogSkip --> Log
 ```
 
@@ -335,7 +339,9 @@ flowchart TD
 - **Channel selection** — global channels plus optional per-website scoping via
   `website_notification_channel`. Absence of pivot rows means all enabled globals.
 - **Providers** — MVP supports Email and Telegram; WhatsApp and Webhook are Future and must not
-  be built now.
+  be built now. **Browser Push** (`WebPushProvider`, Phase 11 — planned) implements the same contract
+  and is registered in `NotificationProviderRegistry`; the dispatcher and incident engine require
+  **no change** (see §14.1 and [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §7.3).
 - **Delivery log** — every attempt writes a `notification_logs` row (sent, failed, or suppressed).
 - **Implemented paths (Phase 7, PLAN wins over old names)** — contract
   `app/Contracts/NotificationProvider.php`, dispatcher
@@ -425,8 +431,31 @@ metadata, rule names, scores, and snapshot artifacts are stripped (see `DECISION
 
 The status page lives entirely on the **web/UI plane**. It performs **no outbound HTTP fetch** (no
 SSRF surface, no probe), enqueues **no jobs**, and dispatches **no notifications** — rendering is a
-read of already-persisted snapshot columns plus the projection cache. This keeps `/status` cheap and
-safe as the only high-traffic public endpoint (STATUS-PAGE.md §9.3, §10.1).
+read of already-persisted snapshot columns plus the projection cache. This keeps the status page
+cheap and safe as the only high-traffic public endpoint (STATUS-PAGE.md §9.3, §10.1).
+
+### 10.4 Multiple status pages (Phase 11 — planned, `ADR-031`)
+
+```mermaid
+flowchart TD
+    Req[GET /status/slug] --> Resolve[Resolve status_pages by slug]
+    Req2[GET /status legacy] --> Redir[302 to default page slug]
+    Resolve --> Gate{visibility_mode}
+    Gate -- Private --> NotFound[404 fail closed]
+    Gate -- Password Protected --> Unlock{Unlocked for page_id}
+    Gate -- Public --> Project[Project published websites]
+    Unlock -- no --> Form[Password form - no data]
+    Unlock -- yes --> Project
+    Project --> Cache[StatusPageCache keyed by page id]
+    Cache --> Render[Redacted HTML]
+```
+
+- Admin CRUD at **`/admin/status-pages`** (`index`/`create`/`store`/`edit`/`update`/`destroy`)
+  behind **auth + admin**.
+- A website's page is `websites.status_page_id`; NULL falls back to the default page
+  (`status_pages.is_default = 1`).
+- The unlock session is keyed per page (`status_unlock.{page_id}`); the cache key includes the page
+  id; the redaction boundary is enforced per page and is unchanged (STATUS-PAGE.md §1.4, §4).
 
 ---
 
@@ -524,7 +553,56 @@ flowchart TD
 
 ---
 
-## 14. Diagram Conventions
+## 14. Phase 11 Components & Flows (implemented)
+
+> **Implemented (Phase 11).** These components are realised per [`DECISIONS.md`](DECISIONS.md)
+> `ADR-031`–`ADR-034`; the names below are the frozen names the implementation uses.
+
+### 14.1 Browser Push subscription registration + `WebPushProvider`
+
+```mermaid
+flowchart TD
+    Opt[User opts in in browser] --> SR[Service worker registers]
+    SR --> Post[POST /admin/push/subscribe - auth admin CSRF]
+    Post --> Row[push_subscriptions row]
+    Incident[Incident event] --> Disp[NotificationDispatcher unchanged]
+    Disp --> Gate[Dedupe and cooldown gate unchanged]
+    Gate --> Prov[WebPushProvider]
+    Prov --> Redact[MessageRedactor]
+    Redact --> Push[Push service]
+    Push --> Log[notification_logs row]
+    Unsub[DELETE unsubscribe] --> Disable[Row disabled]
+```
+
+- `WebPushProvider` implements the **same contract** as `EmailProvider`/`TelegramProvider`
+  (`app/Contracts/NotificationProvider.php`) and is registered in `NotificationProviderRegistry`;
+  the `IncidentEngine` is **not modified**.
+- VAPID keys from `config/sentinel.php` + env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT`); the private key is **never logged**.
+- Service worker at `public/` (push event + notificationclick); opt-in JS in `resources/js/app.js`.
+- Dedup/cooldown via the existing `NotificationDispatcher` is **unchanged**
+  ([`NOTIFICATIONS.md`](NOTIFICATIONS.md) §7.3).
+
+### 14.2 Theme bootstrap (Light / Dark / System)
+
+- Tailwind v4 class-based dark variant via `@custom-variant dark`.
+- Persistence via `localStorage` + cookie; a **no-FOUC inline bootstrap script** in the Blade
+  `<head>` applies the theme before first paint.
+- `data-theme` / `.dark` are applied to `<html>`; the three-state control includes System, which
+  follows `prefers-color-scheme`. Tokens are defined in `resources/css/app.css`.
+
+### 14.3 Shared UI primitives
+
+- `x-form.field` — label + help icon with hover tooltip **and** click modal + error + hint.
+- `x-modal` — Alpine-based; used by delete confirm, help, and bulk actions.
+- `x-per-page` selector — 10 / 20 / 50 / 100 / All, preserving the query string, backed by a shared
+  controller-side validated per-page whitelist helper.
+- Icon-button convention for row actions with accessible `aria-label`; **delete is always gated by a
+  confirmation modal**.
+
+---
+
+## 15. Diagram Conventions
 
 - All diagrams are **Mermaid** and must render on GitHub.
 - Node labels avoid double quotes and parentheses inside square brackets to prevent parse errors.

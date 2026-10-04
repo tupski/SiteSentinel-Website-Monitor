@@ -10,7 +10,7 @@ use App\Models\Incident;
 use App\Models\NotificationChannel;
 use App\Models\NotificationLog;
 use App\Models\Snapshot;
-use App\Models\StatusPageSetting;
+use App\Models\StatusPage;
 use App\Models\Website;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
@@ -20,8 +20,8 @@ use Illuminate\Support\Facades\Hash;
  *
  * A realistic fixture populates EVERY sensitive field with a unique canary and
  * asserts the raw public HTTP body (HTML source) and the JSON body never
- * contain any of them, across every visibility mode and unlock state. A
- * failure here means a leak path exists.
+ * contain any of them, across every visibility mode and unlock state, for
+ * EACH page independently (ADR-031). A failure here means a leak path exists.
  */
 final class RedactionRegressionTest extends StatusPageTestCase
 {
@@ -50,11 +50,12 @@ final class RedactionRegressionTest extends StatusPageTestCase
         ];
     }
 
-    private function seedLeakyFixture(): Website
+    private function seedLeakyFixture(?int $pageId = null): Website
     {
         $website = $this->makeWebsite([
             'name' => 'Public Alias Name',
             'status_alias' => 'Published Service',
+            'status_page_id' => $pageId,
             'status_availability' => 'DOWN',
             'status_security' => 'INCIDENT',
             'last_checked_at' => now('UTC'),
@@ -155,17 +156,27 @@ final class RedactionRegressionTest extends StatusPageTestCase
         }
     }
 
+    private function showUrl(StatusPage $page): string
+    {
+        return route('status.show', ['statusPage' => $page->slug]);
+    }
+
+    private function jsonUrl(StatusPage $page): string
+    {
+        return route('status.json', ['statusPage' => $page->slug]);
+    }
+
     public function test_private_mode_admin_projection_never_leaks_canaries(): void
     {
         $this->seedLeakyFixture();
-        $this->setMode(StatusPageSetting::MODE_PRIVATE);
+        $page = $this->setMode(StatusPage::MODE_PRIVATE);
         $this->actingAs($this->admin());
 
-        $html = $this->get(route('status.show'));
+        $html = $this->get($this->showUrl($page));
         $html->assertOk();
         $this->assertNoCanaries((string) $html->getContent(), 'Private HTML');
 
-        $json = $this->getJson(route('status.json'));
+        $json = $this->getJson($this->jsonUrl($page));
         $json->assertOk();
         $this->assertNoCanaries((string) $json->getContent(), 'Private JSON');
     }
@@ -173,13 +184,13 @@ final class RedactionRegressionTest extends StatusPageTestCase
     public function test_public_mode_anon_projection_never_leaks_canaries(): void
     {
         $this->seedLeakyFixture();
-        $this->setMode(StatusPageSetting::MODE_PUBLIC);
+        $page = $this->setMode(StatusPage::MODE_PUBLIC);
 
-        $html = $this->get(route('status.show'));
+        $html = $this->get($this->showUrl($page));
         $html->assertOk();
         $this->assertNoCanaries((string) $html->getContent(), 'Public HTML');
 
-        $json = $this->getJson(route('status.json'));
+        $json = $this->getJson($this->jsonUrl($page));
         $json->assertOk();
         $this->assertNoCanaries((string) $json->getContent(), 'Public JSON');
     }
@@ -187,36 +198,36 @@ final class RedactionRegressionTest extends StatusPageTestCase
     public function test_password_locked_projection_never_leaks_canaries(): void
     {
         $this->seedLeakyFixture();
-        $this->setMode(StatusPageSetting::MODE_PASSWORD_PROTECTED, [
+        $page = $this->setMode(StatusPage::MODE_PASSWORD_PROTECTED, [
             'password_hash' => Hash::make('correct-horse-battery'),
         ]);
 
-        $html = $this->get(route('status.show'));
+        $html = $this->get($this->showUrl($page));
         $html->assertOk();
         $this->assertNoCanaries((string) $html->getContent(), 'Password locked HTML');
 
-        $json = $this->getJson(route('status.json'));
+        $json = $this->getJson($this->jsonUrl($page));
         $this->assertNoCanaries((string) $json->getContent(), 'Password locked JSON');
     }
 
     public function test_password_unlocked_projection_never_leaks_canaries(): void
     {
         $this->seedLeakyFixture();
-        $this->setMode(StatusPageSetting::MODE_PASSWORD_PROTECTED, [
+        $page = $this->setMode(StatusPage::MODE_PASSWORD_PROTECTED, [
             'password_hash' => Hash::make('correct-horse-battery'),
         ]);
 
-        $locked = $this->get(route('status.show'));
+        $locked = $this->get($this->showUrl($page));
         $this->forwardSessionCookie($locked);
 
-        $unlock = $this->post(route('status.unlock'), ['password' => 'correct-horse-battery']);
+        $unlock = $this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'correct-horse-battery']);
         $this->forwardSessionCookie($unlock);
 
-        $html = $this->get(route('status.show'));
+        $html = $this->get($this->showUrl($page));
         $html->assertOk();
         $this->assertNoCanaries((string) $html->getContent(), 'Password unlocked HTML');
 
-        $json = $this->getJson(route('status.json'));
+        $json = $this->getJson($this->jsonUrl($page));
         $json->assertOk();
         $this->assertNoCanaries((string) $json->getContent(), 'Password unlocked JSON');
     }
@@ -224,68 +235,116 @@ final class RedactionRegressionTest extends StatusPageTestCase
     public function test_password_invalid_attempt_never_leaks_canaries(): void
     {
         $this->seedLeakyFixture();
-        $this->setMode(StatusPageSetting::MODE_PASSWORD_PROTECTED, [
+        $page = $this->setMode(StatusPage::MODE_PASSWORD_PROTECTED, [
             'password_hash' => Hash::make('correct-horse-battery'),
         ]);
 
-        $response = $this->postJson(route('status.unlock'), ['password' => 'wrong-password-here']);
+        $response = $this->postJson(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'wrong-password-here']);
         $this->assertNoCanaries((string) $response->getContent(), 'Password invalid JSON');
 
-        $html = $this->get(route('status.show'));
+        $html = $this->get($this->showUrl($page));
         $this->assertNoCanaries((string) $html->getContent(), 'Password invalid HTML');
     }
 
     public function test_password_expired_session_never_leaks_canaries(): void
     {
         $this->seedLeakyFixture();
-        $this->setMode(StatusPageSetting::MODE_PASSWORD_PROTECTED, [
+        $page = $this->setMode(StatusPage::MODE_PASSWORD_PROTECTED, [
             'password_hash' => Hash::make('correct-horse-battery'),
         ]);
 
-        $locked = $this->get(route('status.show'));
+        $locked = $this->get($this->showUrl($page));
         $this->forwardSessionCookie($locked);
-        $unlock = $this->post(route('status.unlock'), ['password' => 'correct-horse-battery']);
+        $unlock = $this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'correct-horse-battery']);
         $this->forwardSessionCookie($unlock);
 
-        // Bump the settings version (e.g. branding change) => session expires.
+        // Bump the page's version (e.g. name change) => session expires.
         Carbon::setTestNow(now()->addMinute());
-        $settings = StatusPageSetting::singleton();
-        $settings->branding = ['title' => 'Rotated'];
-        $settings->save();
+        $page->name = 'Rotated';
+        $page->save();
         Carbon::setTestNow();
 
-        $html = $this->get(route('status.show'));
+        $html = $this->get($this->showUrl($page));
         $this->assertNoCanaries((string) $html->getContent(), 'Password expired HTML');
         $html->assertDontSee('Published Service', false);
 
-        $json = $this->getJson(route('status.json'));
+        $json = $this->getJson($this->jsonUrl($page));
         $this->assertNoCanaries((string) $json->getContent(), 'Password expired JSON');
     }
 
     public function test_password_rotated_session_never_leaks_canaries(): void
     {
         $this->seedLeakyFixture();
-        $this->setMode(StatusPageSetting::MODE_PASSWORD_PROTECTED, [
+        $page = $this->setMode(StatusPage::MODE_PASSWORD_PROTECTED, [
             'password_hash' => Hash::make('correct-horse-battery'),
         ]);
 
-        $locked = $this->get(route('status.show'));
+        $locked = $this->get($this->showUrl($page));
         $this->forwardSessionCookie($locked);
-        $unlock = $this->post(route('status.unlock'), ['password' => 'correct-horse-battery']);
+        $unlock = $this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'correct-horse-battery']);
         $this->forwardSessionCookie($unlock);
 
         // Rotate the password: updated_at advances, old unlock is revoked.
         Carbon::setTestNow(now()->addMinute());
-        $settings = StatusPageSetting::singleton();
-        $settings->password_hash = Hash::make('rotated-secret-passphrase');
-        $settings->save();
+        $page->password_hash = Hash::make('rotated-secret-passphrase');
+        $page->save();
         Carbon::setTestNow();
 
-        $html = $this->get(route('status.show'));
+        $html = $this->get($this->showUrl($page));
         $this->assertNoCanaries((string) $html->getContent(), 'Password rotated HTML');
         $html->assertDontSee('Published Service', false);
 
-        $json = $this->getJson(route('status.json'));
+        $json = $this->getJson($this->jsonUrl($page));
         $this->assertNoCanaries((string) $json->getContent(), 'Password rotated JSON');
+    }
+
+    /**
+     * A non-default page carrying its own leaky fixture must redact on the same
+     * boundary as the default page, across every visibility mode (ADR-031).
+     */
+    public function test_non_default_page_redacts_across_all_visibility_modes(): void
+    {
+        $page = $this->makePage(['slug' => 'tenant-redact']);
+        $this->seedLeakyFixture($page->id);
+
+        // Private (admin only)
+        $this->setPageMode($page, StatusPage::MODE_PRIVATE);
+        $this->actingAs($this->admin());
+        $this->assertNoCanaries((string) $this->get($this->showUrl($page))->getContent(), 'Non-default Private HTML');
+
+        // Public
+        $this->setPageMode($page, StatusPage::MODE_PUBLIC);
+        $this->assertNoCanaries((string) $this->get($this->showUrl($page))->getContent(), 'Non-default Public HTML');
+        $this->assertNoCanaries((string) $this->getJson($this->jsonUrl($page))->getContent(), 'Non-default Public JSON');
+
+        // Password Protected (locked + unlocked)
+        $this->setPageMode($page, StatusPage::MODE_PASSWORD_PROTECTED, [
+            'password_hash' => Hash::make('correct-horse-battery'),
+        ]);
+        $this->assertNoCanaries((string) $this->get($this->showUrl($page))->getContent(), 'Non-default Locked HTML');
+
+        $this->forwardSessionCookie($this->get($this->showUrl($page)));
+        $this->forwardSessionCookie($this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'correct-horse-battery']));
+        $this->assertNoCanaries((string) $this->get($this->showUrl($page))->getContent(), 'Non-default Unlocked HTML');
+    }
+
+    /**
+     * Page A must never render page B's leaked service data, in any mode.
+     */
+    public function test_page_isolation_never_leaks_another_pages_data(): void
+    {
+        $pageA = $this->makePage(['slug' => 'page-a', 'visibility_mode' => StatusPage::MODE_PUBLIC]);
+        $pageB = $this->makePage(['slug' => 'page-b', 'visibility_mode' => StatusPage::MODE_PUBLIC]);
+
+        $this->makeWebsite(['status_alias' => 'Service A', 'status_page_id' => $pageA->id, 'status_availability' => 'UP', 'status_security' => 'OK']);
+        $this->makeWebsite(['status_alias' => 'Service B', 'status_page_id' => $pageB->id, 'status_availability' => 'UP', 'status_security' => 'OK']);
+
+        $htmlA = (string) $this->get($this->showUrl($pageA))->getContent();
+        $this->assertStringContainsString('Service A', $htmlA);
+        $this->assertStringNotContainsString('Service B', $htmlA);
+
+        $jsonB = (string) $this->getJson($this->jsonUrl($pageB))->getContent();
+        $this->assertStringContainsString('Service B', $jsonB);
+        $this->assertStringNotContainsString('Service A', $jsonB);
     }
 }

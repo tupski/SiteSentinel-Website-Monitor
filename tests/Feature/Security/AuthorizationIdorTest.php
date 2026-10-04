@@ -6,7 +6,7 @@ namespace Tests\Feature\Security;
 
 use App\Models\Incident;
 use App\Models\NotificationChannel;
-use App\Models\StatusPageSetting;
+use App\Models\StatusPage;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 
@@ -51,6 +51,8 @@ final class AuthorizationIdorTest extends SecurityTestCase
         $this->put(route('admin.notifications.update', $channel), [])->assertRedirect(route('login'));
         $this->delete(route('admin.notifications.destroy', $channel))->assertRedirect(route('login'));
         $this->put(route('admin.status-settings.update'), [])->assertRedirect(route('login'));
+        $this->get(route('admin.status-pages.index'))->assertRedirect(route('login'));
+        $this->post(route('admin.status-pages.store'), [])->assertRedirect(route('login'));
     }
 
     public function test_every_admin_route_rejects_non_admin_users(): void
@@ -72,6 +74,7 @@ final class AuthorizationIdorTest extends SecurityTestCase
         $this->actingAs($viewer)->post(route('admin.incidents.acknowledge', $incident))->assertForbidden();
         $this->actingAs($viewer)->post(route('admin.incidents.resolve', $incident))->assertForbidden();
         $this->actingAs($viewer)->put(route('admin.status-settings.update'), [])->assertForbidden();
+        $this->actingAs($viewer)->get(route('admin.status-pages.index'))->assertForbidden();
     }
 
     public function test_disabled_account_is_rejected_and_session_invalidated(): void
@@ -84,44 +87,52 @@ final class AuthorizationIdorTest extends SecurityTestCase
     public function test_private_status_page_is_not_reachable_by_anonymous_enumeration(): void
     {
         $this->makeWebsite(['status_alias' => 'Hidden Service']);
-        $settings = StatusPageSetting::singleton();
-        $settings->visibility_mode = StatusPageSetting::MODE_PRIVATE;
-        $settings->save();
+        $page = $this->defaultPage();
+        $page->visibility_mode = StatusPage::MODE_PRIVATE;
+        $page->save();
 
-        $this->get(route('status.show'))->assertNotFound();
-        $this->getJson(route('status.json'))->assertNotFound();
+        $this->get(route('status.show', ['statusPage' => $page->slug]))->assertNotFound();
+        $this->getJson(route('status.json', ['statusPage' => $page->slug]))->assertNotFound();
     }
 
     public function test_private_status_page_rejects_non_admin_authenticated_user(): void
     {
         $this->makeWebsite(['status_alias' => 'Hidden Service']);
-        $settings = StatusPageSetting::singleton();
-        $settings->visibility_mode = StatusPageSetting::MODE_PRIVATE;
-        $settings->save();
+        $page = $this->defaultPage();
+        $page->visibility_mode = StatusPage::MODE_PRIVATE;
+        $page->save();
 
         $viewer = User::factory()->create(['role' => 'viewer', 'is_active' => true]);
-        $this->actingAs($viewer)->get(route('status.show'))->assertNotFound();
+        $this->actingAs($viewer)->get(route('status.show', ['statusPage' => $page->slug]))->assertNotFound();
     }
 
     public function test_password_mode_without_hash_fails_closed_for_all_callers(): void
     {
         $this->makeWebsite(['status_alias' => 'Locked Service']);
-        $settings = StatusPageSetting::singleton();
-        $settings->visibility_mode = StatusPageSetting::MODE_PASSWORD_PROTECTED;
-        $settings->password_hash = null;
-        $settings->save();
+        $page = $this->defaultPage();
+        $page->visibility_mode = StatusPage::MODE_PASSWORD_PROTECTED;
+        $page->password_hash = null;
+        $page->save();
 
-        $this->get(route('status.show'))->assertNotFound();
-        $this->getJson(route('status.json'))->assertNotFound();
+        $this->get(route('status.show', ['statusPage' => $page->slug]))->assertNotFound();
+        $this->getJson(route('status.json', ['statusPage' => $page->slug]))->assertNotFound();
     }
 
     public function test_unlock_endpoint_is_404_when_not_password_mode(): void
     {
-        $settings = StatusPageSetting::singleton();
-        $settings->visibility_mode = StatusPageSetting::MODE_PUBLIC;
-        $settings->password_hash = Hash::make('irrelevant-password');
-        $settings->save();
+        $page = $this->defaultPage();
+        $page->visibility_mode = StatusPage::MODE_PUBLIC;
+        $page->password_hash = Hash::make('irrelevant-password');
+        $page->save();
 
-        $this->post(route('status.unlock'), ['password' => 'anything'])->assertNotFound();
+        $this->post(route('status.unlock', ['statusPage' => $page->slug]), ['password' => 'anything'])->assertNotFound();
+    }
+
+    private function defaultPage(): StatusPage
+    {
+        return StatusPage::query()->firstOrCreate(
+            ['slug' => StatusPage::DEFAULT_SLUG],
+            ['name' => 'Default', 'is_default' => true, 'visibility_mode' => StatusPage::MODE_PRIVATE]
+        );
     }
 }
