@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Incidents;
 
 use App\Models\Incident;
+use App\Models\Snapshot;
 use App\Models\User;
 use App\Models\Website;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
@@ -36,6 +38,21 @@ final class IncidentHttpTest extends TestCase
             'check_interval_seconds' => 300,
             'timeout_seconds' => 10,
             'expected_status' => 200,
+        ]);
+    }
+
+    /** Persist a snapshot row + its on-disk HTML artefact. */
+    private function makeSnapshot(Incident $incident, string $html = '<html><body>evidence</body></html>'): Snapshot
+    {
+        Storage::fake('local');
+        $path = "snapshots/{$this->website->id}/".uniqid().'.html';
+        Storage::disk('local')->put($path, $html);
+
+        return Snapshot::create([
+            'website_id' => $this->website->id,
+            'incident_id' => $incident->id,
+            'html_path' => $path,
+            'captured_at' => now(),
         ]);
     }
 
@@ -234,5 +251,76 @@ final class IncidentHttpTest extends TestCase
         $response->assertOk();
         $response->assertSee('Open incidents');
         $response->assertSee('Clear filter');
+    }
+
+    /** Evidence snapshots are listed with a "View" affordance (modal trigger). */
+    public function test_incident_detail_lists_snapshots_with_a_view_trigger(): void
+    {
+        $incident = $this->makeIncident();
+        $snapshot = $this->makeSnapshot($incident);
+        $this->actingAs($this->admin());
+
+        $response = $this->get(route('admin.incidents.show', $incident));
+
+        $response->assertOk();
+        $response->assertSee('Evidence snapshots');
+        $response->assertSee('snapshot-'.$snapshot->id, false);
+        // The captured HTML is only ever framed from the admin endpoint, never
+        // injected inline (AGENTS.md §11).
+        $response->assertSee('sandbox=""', false);
+    }
+
+    /** The snapshot endpoint is admin-only like every other incident route. */
+    public function test_snapshot_endpoint_requires_authentication_and_admin(): void
+    {
+        $incident = $this->makeIncident();
+        $snapshot = $this->makeSnapshot($incident);
+
+        $this->get(route('admin.incidents.snapshots.show', [$incident, $snapshot]))
+            ->assertRedirect(route('login'));
+
+        $this->actingAs(User::factory()->create(['role' => 'viewer', 'is_active' => true]));
+        $this->get(route('admin.incidents.snapshots.show', [$incident, $snapshot]))
+            ->assertForbidden();
+    }
+
+    /** Admin receives the captured bytes as an inert, sandboxed document. */
+    public function test_admin_can_open_a_snapshot_rendered_as_a_sandboxed_document(): void
+    {
+        $incident = $this->makeIncident();
+        $snapshot = $this->makeSnapshot($incident, '<html><body>captured-evidence</body></html>');
+        $this->actingAs($this->admin());
+
+        $response = $this->get(route('admin.incidents.snapshots.show', [$incident, $snapshot]));
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $response->assertHeader('X-Content-Type-Options', 'nosniff');
+        $response->assertHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+        $this->assertStringContainsString('captured-evidence', (string) $response->getContent());
+    }
+
+    /** A snapshot can never be read through a different incident (IDOR). */
+    public function test_snapshot_cannot_be_read_through_another_incident(): void
+    {
+        $incident = $this->makeIncident();
+        $snapshot = $this->makeSnapshot($incident);
+        $other = $this->makeIncident(['dedupe_key' => 'other-'.$this->website->id]);
+        $this->actingAs($this->admin());
+
+        $this->get(route('admin.incidents.snapshots.show', [$other, $snapshot]))
+            ->assertNotFound();
+    }
+
+    /** A missing on-disk artefact is a 404, never a fatal error. */
+    public function test_snapshot_missing_file_returns_not_found(): void
+    {
+        $incident = $this->makeIncident();
+        $snapshot = $this->makeSnapshot($incident);
+        Storage::disk('local')->delete($snapshot->html_path);
+        $this->actingAs($this->admin());
+
+        $this->get(route('admin.incidents.snapshots.show', [$incident, $snapshot]))
+            ->assertNotFound();
     }
 }

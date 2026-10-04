@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Incident;
+use App\Models\Snapshot;
 use App\Services\Audit\AuditLogger;
 use App\Services\Incidents\IncidentStateMachine;
 use App\Services\Notifications\AdminNotificationService;
@@ -14,7 +15,10 @@ use App\Services\Notifications\NotificationIntents;
 use App\Support\PerPage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Throwable;
 
 /**
@@ -80,6 +84,39 @@ final class IncidentController extends Controller
         $deliveryLogs = $incident->notificationLogs->sortByDesc('id');
 
         return view('admin.incidents.show', ['incident' => $incident, 'deliveryLogs' => $deliveryLogs]);
+    }
+
+    /**
+     * Serve one evidence snapshot's captured HTML for the incident detail modal.
+     *
+     * The bytes are untrusted (they were captured from a monitored external
+     * site), so they are never rendered as trusted markup here (AGENTS.md §11).
+     * The response is a sandboxed document: `Content-Security-Policy:
+     * sandbox` + `X-Content-Type-Options: nosniff` neutralise scripts, plugins,
+     * forms and same-origin access even if the admin previews it outside the
+     * `<iframe sandbox>` the view uses. Delivery is scoped to the incident so a
+     * snapshot can never be read through another incident (IDOR).
+     */
+    public function snapshot(Incident $incident, Snapshot $snapshot): Response
+    {
+        // Ownership: the snapshot must belong to the incident in the URL.
+        if ((int) $snapshot->incident_id !== (int) $incident->getKey()) {
+            throw new NotFoundHttpException;
+        }
+
+        $path = (string) ($snapshot->html_path ?? '');
+        $disk = Storage::disk((string) config('sentinel.snapshots_disk', 'local'));
+
+        if ($path === '' || ! $disk->exists($path)) {
+            throw new NotFoundHttpException;
+        }
+
+        return response((string) $disk->get($path), 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+            'Cache-Control' => 'no-store, private',
+        ]);
     }
 
     public function acknowledge(Request $request, Incident $incident): RedirectResponse

@@ -60,6 +60,12 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
     // Phase 6: incident lifecycle
     Route::get('incidents', [IncidentController::class, 'index'])->name('incidents.index');
     Route::get('incidents/{incident}', [IncidentController::class, 'show'])->name('incidents.show');
+    // Evidence snapshot HTML, scoped to its incident. Admin-only via the group
+    // gate; the controller enforces the incident↔snapshot ownership (IDOR) and
+    // serves the captured bytes as a sandboxed document, never as trusted markup
+    // (AGENTS.md §11). Rendered client-side inside a sandboxed <iframe>.
+    Route::get('incidents/{incident}/snapshots/{snapshot}', [IncidentController::class, 'snapshot'])
+        ->name('incidents.snapshots.show');
     Route::post('incidents/{incident}/acknowledge', [IncidentController::class, 'acknowledge'])->name('incidents.acknowledge');
     Route::post('incidents/{incident}/resolve', [IncidentController::class, 'resolve'])->name('incidents.resolve');
 

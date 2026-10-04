@@ -209,18 +209,83 @@
             </section>
 
             @if ($incident->snapshots->isNotEmpty())
-                {{-- Evidence is admin-only and rendered as data, never as markup (AGENTS.md §11). --}}
+                {{-- Evidence is admin-only. The path is shown as data and the
+                     captured bytes are only ever rendered inside a sandboxed
+                     <iframe> pointing at the admin-only snapshot endpoint — never
+                     injected as markup (AGENTS.md §11). --}}
                 <section class="rounded-lg border border-border bg-surface-elevated p-6 shadow-sm">
                     <h2 class="text-lg font-semibold text-text">{{ __('Evidence snapshots') }}</h2>
                     <ul class="mt-3 space-y-2 text-sm">
                         @foreach ($incident->snapshots as $snapshot)
-                            <li>
-                                <span class="font-mono text-xs">{{ $snapshot->html_path }}</span>
-                                <span class="text-text-subtle">— {{ $snapshot->captured_at->diffForHumans() }}</span>
+                            <li class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <span class="block truncate font-mono text-xs" title="{{ $snapshot->html_path }}">{{ $snapshot->html_path }}</span>
+                                    <span class="text-text-subtle">{{ $snapshot->captured_at->diffForHumans() }}</span>
+                                </div>
+                                <x-ui.button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    class="shrink-0"
+                                    x-on:click="$dispatch('open-modal', { name: 'snapshot-{{ $snapshot->id }}' })"
+                                >{{ __('View') }}</x-ui.button>
                             </li>
                         @endforeach
                     </ul>
                 </section>
+
+                {{-- One modal per snapshot. The iframe `src` is bound to the modal
+                     `open` state so the captured HTML is fetched lazily (never on
+                     page load) and only from the admin-only, incident-scoped
+                     endpoint. `sandbox=""` disables scripts, forms, plugins and
+                     same-origin access in the framed document. --}}
+                @foreach ($incident->snapshots as $snapshot)
+                    <x-modal name="snapshot-{{ $snapshot->id }}" :title="__('Evidence snapshot')" max-width="max-w-5xl">
+                        <div class="space-y-3">
+                            <dl class="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Captured at') }}</dt>
+                                    <dd>{{ $snapshot->captured_at->format('Y-m-d H:i:s') }}</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Size') }}</dt>
+                                    <dd>{{ number_format((int) $snapshot->size_bytes) }} {{ __('bytes') }}</dd>
+                                </div>
+                                @if ($snapshot->final_url)
+                                    <div class="col-span-2">
+                                        <dt class="text-text-subtle">{{ __('Final URL') }}</dt>
+                                        <dd class="break-all font-mono">{{ $snapshot->final_url }}</dd>
+                                    </div>
+                                @endif
+                                @if ($snapshot->title)
+                                    <div class="col-span-2">
+                                        <dt class="text-text-subtle">{{ __('Title') }}</dt>
+                                        <dd>{{ $snapshot->title }}</dd>
+                                    </div>
+                                @endif
+                            </dl>
+
+                            <div class="h-[70vh] overflow-hidden rounded-md border border-border bg-white">
+                                <iframe
+                                    x-bind:src="open ? '{{ route('admin.incidents.snapshots.show', [$incident, $snapshot]) }}' : null"
+                                    sandbox=""
+                                    referrerpolicy="no-referrer"
+                                    loading="lazy"
+                                    title="{{ __('Evidence snapshot preview') }}"
+                                    class="h-full w-full"
+                                ></iframe>
+                            </div>
+                        </div>
+
+                        <x-slot name="footer">
+                            <x-ui.button
+                                type="button"
+                                variant="outline"
+                                x-on:click="$dispatch('close-modal', { name: 'snapshot-{{ $snapshot->id }}' })"
+                            >{{ __('Close') }}</x-ui.button>
+                        </x-slot>
+                    </x-modal>
+                @endforeach
             @endif
         </div>
     </div>
