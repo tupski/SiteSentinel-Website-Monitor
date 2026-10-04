@@ -1,5 +1,64 @@
 # Changelog
 
+## [2026-10-04] — Shared UI primitives + semantic theme tokens (ADR-033 / ADR-034, Phase 2)
+
+### Added (UI layer — no architecture, route or controller change)
+
+- **Semantic token layer in [`resources/css/app.css`](resources/css/app.css).** Raw values are
+  declared on `:root` and flipped on `.dark`, then exposed to Tailwind v4 via `@theme inline` so
+  the utilities (`bg-surface-elevated`, `text-text-muted`, `border-border-muted`, `ring-focus`, …)
+  are correct in BOTH themes without a `dark:` duplicate. Tokens introduced: `surface`,
+  `surface-elevated`, `surface-muted`, `surface-hover`; `border`, `border-muted`; `text`,
+  `text-muted`, `text-subtle`; `primary`/`primary-hover`/`primary-foreground`;
+  `danger`/`danger-hover`/`danger-foreground`/`danger-muted`; `success`(+`-foreground`/`-muted`);
+  `warning`(+`-foreground`/`-muted`); `info`(+`-foreground`/`-muted`); and the `focus` ring colour.
+  `--radius-md`/`--radius-lg` are now registered as theme variables. Checkboxes and radios get a
+  global `accent-color` so they stay visible on dark surfaces.
+- **New anonymous Blade primitives** under `resources/views/components/ui/`:
+  [`button`](resources/views/components/ui/button.blade.php) (variants primary/secondary/outline/ghost/danger,
+  sizes sm/md/lg, `href` → `<a>`, `iconOnly` square sizing, focus-visible ring + disabled state),
+  [`card`](resources/views/components/ui/card.blade.php) (`title`/`subtitle`/`actions`/`padding`),
+  [`table`](resources/views/components/ui/table.blade.php) +
+  [`table-head`](resources/views/components/ui/table-head.blade.php) +
+  [`table-body`](resources/views/components/ui/table-body.blade.php) +
+  [`table-empty`](resources/views/components/ui/table-empty.blade.php) (outer container always
+  carries `overflow-x-auto` so wide tables never push the page into horizontal overflow),
+  [`badge`](resources/views/components/ui/badge.blade.php) (neutral/success/warning/danger/info),
+  [`alert`](resources/views/components/ui/alert.blade.php) (info/success/warning/danger, `role="alert"`),
+  [`empty-state`](resources/views/components/ui/empty-state.blade.php) (icon/title/description/action),
+  [`input`](resources/views/components/ui/input.blade.php) /
+  [`select`](resources/views/components/ui/select.blade.php) /
+  [`textarea`](resources/views/components/ui/textarea.blade.php) (shared bg/text/placeholder/border/
+  focus/disabled/error vocabulary), [`checkbox`](resources/views/components/ui/checkbox.blade.php) /
+  [`radio`](resources/views/components/ui/radio.blade.php), and a minimal
+  [`skeleton`](resources/views/components/ui/skeleton.blade.php).
+- **Dark-safe pagination override** at [`resources/views/vendor/pagination/tailwind.blade.php`](resources/views/vendor/pagination/tailwind.blade.php) —
+  replaces Laravel's light-only default with token-based markup (previous/next, window, results summary).
+
+### Changed (internals only — public APIs preserved)
+
+- [`form/field.blade.php`](resources/views/components/form/field.blade.php): the label, help button,
+  hint, error and password-toggle now use the semantic token utilities instead of hardcoded slate/
+  red. The `x-form.field` name, props, IDs and ARIA wiring are unchanged.
+- [`per-page.blade.php`](resources/views/components/per-page.blade.php): the select and noscript
+  Apply button are now token-based (dark-safe). Name, whitelist and query-preservation unchanged.
+
+### Notes
+
+- No new npm/composer dependency; no icon library (the existing inline-SVG convention is kept).
+- **The legacy `html.dark .bg-white` / `.text-slate-*` / `.border-slate-*` override hacks in
+  `app.css` remain for now** so unmigrated admin views stay coherent in dark mode. They are marked
+  "LEGACY BRIDGE" and Phase 3 removes them as views migrate onto the primitives.
+
+### Tests
+
+- Added [`UiPrimitivesTest`](tests/Feature/Ui/UiPrimitivesTest.php) (17 tests): buttons render
+  distinct variant/size markers, `href` renders an anchor, `iconOnly` square sizing + `aria-label`
+  passthrough; card header/actions/padding; the table renders its `overflow-x-auto` container and
+  the empty state renders its spanning cell; each badge and alert variant renders; input/select/
+  textarea share the vocabulary and signal the error state; checkbox/radio use the theme accent;
+  skeleton line count. Asserts structural hooks, never raw colour values.
+
 ## [2026-10-04] — Icon-only theme switcher dropdown (ADR-033)
 
 ### Changed (UI — no architecture change)

@@ -11,11 +11,137 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 
-    /* Semantic surface tokens (ADR-033) — consumed via the dark: variant. */
+    --radius-md: 0.375rem;
+    --radius-lg: 0.5rem;
+
+    /* Legacy raw tokens (ADR-033). The flip-aware semantic layer lives below;
+       these remain only for `body` and the Phase-2 legacy bridge. */
     --color-canvas: #f8fafc;
     --color-canvas-dark: #0f172a;
-    --color-surface: #ffffff;
     --color-surface-dark: #1e293b;
+}
+
+/* ---------------------------------------------------------------------------
+ * Semantic design tokens (Phase 2).
+ *
+ * The raw values live on :root / .dark so they flip with the theme, and are
+ * exposed to Tailwind via `@theme inline` below. Components consume the
+ * resulting utilities (`bg-surface-elevated`, `text-text-muted`,
+ * `border-border-muted`, `ring-focus`, ...) which therefore need NO `dark:`
+ * duplicate — one source of truth, correct in both themes.
+ *
+ * Palette anchors mirror the existing slate / red / green / amber / blue
+ * language already used across the admin views.
+ * ------------------------------------------------------------------------- */
+:root {
+    --surface: #f8fafc;
+    --surface-elevated: #ffffff;
+    --surface-muted: #f1f5f9;
+    --surface-hover: #f1f5f9;
+
+    --border: #e2e8f0;
+    --border-muted: #cbd5e1;
+
+    --text: #0f172a;
+    --text-muted: #475569;
+    --text-subtle: #64748b;
+
+    --primary: #0f172a;
+    --primary-hover: #1e293b;
+    --primary-foreground: #ffffff;
+
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --danger-foreground: #ffffff;
+    --danger-muted: #fef2f2;
+
+    --success: #16a34a;
+    --success-foreground: #ffffff;
+    --success-muted: #f0fdf4;
+
+    --warning: #d97706;
+    --warning-foreground: #ffffff;
+    --warning-muted: #fffbeb;
+
+    --info: #2563eb;
+    --info-foreground: #ffffff;
+    --info-muted: #eff6ff;
+
+    --ring: #64748b;
+}
+
+.dark {
+    --surface: #0f172a;
+    --surface-elevated: #1e293b;
+    --surface-muted: #172033;
+    --surface-hover: #334155;
+
+    --border: #334155;
+    --border-muted: #475569;
+
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --text-subtle: #94a3b8;
+
+    --primary: #e2e8f0;
+    --primary-hover: #f8fafc;
+    --primary-foreground: #0f172a;
+
+    --danger: #dc2626;
+    --danger-hover: #ef4444;
+    --danger-foreground: #ffffff;
+    --danger-muted: #450a0a;
+
+    --success: #16a34a;
+    --success-foreground: #ffffff;
+    --success-muted: #052e16;
+
+    --warning: #d97706;
+    --warning-foreground: #ffffff;
+    --warning-muted: #451a03;
+
+    --info: #2563eb;
+    --info-foreground: #ffffff;
+    --info-muted: #172554;
+
+    --ring: #94a3b8;
+}
+
+@theme inline {
+    --color-surface: var(--surface);
+    --color-surface-elevated: var(--surface-elevated);
+    --color-surface-muted: var(--surface-muted);
+    --color-surface-hover: var(--surface-hover);
+
+    --color-border: var(--border);
+    --color-border-muted: var(--border-muted);
+
+    --color-text: var(--text);
+    --color-text-muted: var(--text-muted);
+    --color-text-subtle: var(--text-subtle);
+
+    --color-primary: var(--primary);
+    --color-primary-hover: var(--primary-hover);
+    --color-primary-foreground: var(--primary-foreground);
+
+    --color-danger: var(--danger);
+    --color-danger-hover: var(--danger-hover);
+    --color-danger-foreground: var(--danger-foreground);
+    --color-danger-muted: var(--danger-muted);
+
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-success-muted: var(--success-muted);
+
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-warning-muted: var(--warning-muted);
+
+    --color-info: var(--info);
+    --color-info-foreground: var(--info-foreground);
+    --color-info-muted: var(--info-muted);
+
+    --color-focus: var(--ring);
 }
 
 /* Alpine x-cloak — hide pre-hydration elements. */
@@ -41,8 +167,17 @@
         color: #e2e8f0;
     }
 
-    /* Baseline dark adaption for the surface utilities used across admin pages
-       so dark mode is coherent even before per-view `dark:` classes land. */
+    /* Native controls (checkbox / radio / range) follow the theme accent. */
+    input[type='checkbox'],
+    input[type='radio'] {
+        accent-color: var(--primary);
+    }
+
+    /* -----------------------------------------------------------------------
+     * LEGACY BRIDGE — Phase 2 keeps these so unmigrated views stay coherent in
+     * dark mode. Phase 3 deletes each block as the views move onto the
+     * `bg-surface-*` / `text-text-*` / `border-border*` token utilities.
+     * --------------------------------------------------------------------- */
     html.dark .bg-white {
         background-color: var(--color-surface-dark);
     }

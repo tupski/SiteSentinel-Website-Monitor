@@ -24,7 +24,7 @@
 <div {{ $attributes->only('class')->merge(['class' => 'space-y-1']) }}>
     @if ($label)
         <div class="flex items-center gap-1.5">
-            <label for="{{ $fieldId }}" class="block text-sm font-medium text-slate-700">
+            <label for="{{ $fieldId }}" class="block text-sm font-medium text-text">
                 {{ $label }}
                 @if ($required)
                     <span class="text-red-600" aria-hidden="true">*</span>
@@ -39,7 +39,7 @@
                 >
                     <button
                         type="button"
-                        class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400 text-[10px] font-semibold leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                        class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border-muted text-[10px] font-semibold leading-none text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                         aria-label="{{ __('Help for :field', ['field' => $label]) }}"
                         aria-describedby="{{ $helpId }}"
                         x-on:mouseenter="tip = true"
@@ -53,7 +53,7 @@
                         x-show="tip"
                         x-cloak
                         role="tooltip"
-                        class="absolute left-0 top-6 z-40 w-64 rounded bg-slate-900 px-3 py-2 text-xs font-normal text-white shadow-lg"
+                        class="absolute left-0 top-6 z-40 w-64 rounded bg-primary px-3 py-2 text-xs font-normal text-primary-foreground shadow-lg"
                     >{{ $hint ?? $help }}</span>
                 </span>
             @endif
@@ -66,7 +66,7 @@
         @if ($name === 'password' || str_contains($name, 'password'))
             <button
                 type="button"
-                class="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                class="absolute inset-y-0 right-0 flex items-center px-3 text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 x-on:click="shown = ! shown; const i = $el.parentElement.querySelector('input'); if (i) { i.type = shown ? 'text' : 'password'; }"
                 x-bind:aria-pressed="shown ? 'true' : 'false'"
                 aria-label="{{ __('Show password') }}"
@@ -84,11 +84,11 @@
     </div>
 
     @if ($hint)
-        <p id="{{ $hintId }}" class="text-xs text-slate-500">{{ $hint }}</p>
+        <p id="{{ $hintId }}" class="text-xs text-text-subtle">{{ $hint }}</p>
     @endif
 
     @error($name)
-        <p id="{{ $errorId }}" role="alert" class="text-sm text-red-600">{{ $message }}</p>
+        <p id="{{ $errorId }}" role="alert" class="text-sm text-danger">{{ $message }}</p>
     @enderror
 
     @if (filled($help))

@@ -35,11 +35,11 @@
         @endif
     @endforeach
 
-    <label for="per_page" class="text-slate-600">{{ __('Per page') }}</label>
+    <label for="per_page" class="text-text-muted">{{ __('Per page') }}</label>
     <select
         id="per_page"
         name="per_page"
-        class="rounded border border-slate-300 px-2 py-1 text-sm focus:border-slate-500 focus:outline-none"
+        class="rounded border border-border-muted bg-surface-elevated px-2 py-1 text-sm text-text focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus"
         x-on:change="change()"
         aria-label="{{ __('Items per page') }}"
     >
@@ -51,6 +51,6 @@
     </select>
 
     <noscript>
-        <button type="submit" class="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white">{{ __('Apply') }}</button>
+        <button type="submit" class="rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground">{{ __('Apply') }}</button>
     </noscript>
 </form>
