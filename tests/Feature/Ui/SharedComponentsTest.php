@@ -73,10 +73,15 @@ final class SharedComponentsTest extends TestCase
     {
         $html = $this->blade('<x-theme-switcher />');
 
+        // Icon-only dropdown (ADR-033): the three choices live in the menu panel.
         $html->assertSee('Light');
         $html->assertSee('Dark');
         $html->assertSee('System');
-        $html->assertSee('store.theme.set', false);
+        $html->assertSee('x-data="themeMenu"', false);
+        $html->assertSee('role="menu"', false);
+        $html->assertSee("select('light')", false);
+        $html->assertSee("select('dark')", false);
+        $html->assertSee("select('system')", false);
     }
 
     public function test_x_form_field_renders_label_hint_and_help_modal(): void

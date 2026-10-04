@@ -69,6 +69,87 @@ Alpine.store('theme', {
 });
 
 /**
+ * Icon-only theme menu (ADR-033).
+ *
+ * Defined here — not inline in a Blade `x-data` attribute — for the same
+ * quoting reason as the modal below, and because the roving-focus and
+ * focus-trap logic does not belong in markup. Reads/writes only the global
+ * `theme` store (localStorage key unchanged) and manages local UI state.
+ * Uses a `role="menu"` / `role="menuitemradio"` pattern.
+ */
+Alpine.data('themeMenu', () => ({
+    open: false,
+    current: 0,
+    items: ['light', 'dark', 'system'],
+
+    init() {
+        this.current = Math.max(0, this.items.indexOf(this.$store.theme.mode));
+    },
+
+    modeLabel() {
+        return { light: 'Light', dark: 'Dark', system: 'System' }[this.$store.theme.mode] || 'System';
+    },
+
+    openMenu(focusIndex) {
+        this.current = focusIndex ?? Math.max(0, this.items.indexOf(this.$store.theme.mode));
+        this.open = true;
+        this.$nextTick(() => this.focusCurrent());
+    },
+
+    closeMenu(returnFocus = false) {
+        this.open = false;
+        if (returnFocus) {
+            this.$refs.trigger.focus();
+        }
+    },
+
+    toggle() {
+        this.open ? this.closeMenu(true) : this.openMenu();
+    },
+
+    focusCurrent() {
+        const nodes = this.$refs.menu.querySelectorAll('[data-theme-option]');
+        if (nodes[this.current]) {
+            nodes[this.current].focus();
+        }
+    },
+
+    move(delta) {
+        const count = this.items.length;
+        this.current = (this.current + delta + count) % count;
+        this.focusCurrent();
+    },
+
+    select(mode) {
+        this.$store.theme.set(mode);
+        this.closeMenu(true);
+    },
+
+    trap(event) {
+        const nodes = this.$refs.menu.querySelectorAll('[data-theme-option]');
+        if (nodes.length === 0) return;
+
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    },
+
+    onTriggerKeydown(event) {
+        if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
+            event.preventDefault();
+            this.openMenu();
+        }
+    },
+}));
+
+/**
  * Reusable modal component (ADR-034).
  *
  * Defined here — NOT inline in a Blade `x-data` attribute — because the

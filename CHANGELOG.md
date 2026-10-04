@@ -1,5 +1,33 @@
 # Changelog
 
+## [2026-10-04] — Icon-only theme switcher dropdown (ADR-033)
+
+### Changed (UI — no architecture change)
+
+- **[`theme-switcher.blade.php`](resources/views/components/theme-switcher.blade.php)** is now an
+  icon-only dropdown. The collapsed trigger renders ONLY the active theme's icon (sun = Light,
+  moon = Dark, monitor = System) and carries `aria-label`, `aria-haspopup="menu"` and
+  `aria-expanded`; no theme name is rendered outside the opened panel. The open panel has a
+  "Theme" header and three `role="menuitemradio"` options (icon + name), the active one marked
+  with `aria-checked="true"` AND a check glyph (not colour alone). Uses the repo's existing
+  inline-SVG icon mechanism (Heroicons-style outline, `stroke="currentColor"`); no icon library
+  added.
+- **`themeMenu` Alpine component** added to [`resources/js/app.js`](resources/js/app.js)
+  (registered before `Alpine.start()`, same JS-defined pattern as `modal`): roving-focus menu with
+  focus trap, opens on Enter/Space/ArrowDown, arrow-key navigation, Enter/Space select, Escape +
+  outside-click close with focus returned to the trigger. Delegates all state to the existing
+  global `theme` store — the `theme` localStorage key and cookie convention are unchanged, and
+  system mode still follows `prefers-color-scheme` live.
+- **Anti-FOUC unchanged:** [`theme-bootstrap.blade.php`](resources/views/partials/theme-bootstrap.blade.php)
+  already resolves `system` via `matchMedia` in the inline blocking `<head>` snippet for all three
+  modes, so no change was required.
+
+### Tests
+
+- Added [`ThemeSwitcherTest`](tests/Feature/ThemeSwitcherTest.php): closed trigger is icon-only
+  (empty rendered text) with correct ARIA wiring; no theme words render outside the dropdown panel;
+  all three choices present; active option exposes `aria-checked` + check glyph.
+
 ## [2026-10-04] — Fix Alpine console errors in the reusable modal (ADR-034)
 
 ### Fixed (bug — no architecture change)
