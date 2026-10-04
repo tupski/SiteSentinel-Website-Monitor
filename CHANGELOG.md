@@ -1,5 +1,52 @@
 # Changelog
 
+## [2026-10-04] — Dark-mode token migration: shared shell, modal, auth, status & error pages (Phase 3c)
+
+### Changed (presentation only — no route/controller/model/behaviour change)
+
+- Migrated the shared shell, modal and the auth/status/error surfaces off hardcoded
+  light-only classes onto the Phase 2 semantic tokens:
+  [`components/modal.blade.php`](resources/views/components/modal.blade.php),
+  [`components/modal-form.blade.php`](resources/views/components/modal-form.blade.php) (via `x-modal`),
+  [`components/admin-layout.blade.php`](resources/views/components/admin-layout.blade.php),
+  [`components/app-layout.blade.php`](resources/views/components/app-layout.blade.php),
+  [`layouts/app.blade.php`](resources/views/layouts/app.blade.php),
+  [`auth/login.blade.php`](resources/views/auth/login.blade.php),
+  [`auth/passwords/email.blade.php`](resources/views/auth/passwords/email.blade.php),
+  [`auth/passwords/reset.blade.php`](resources/views/auth/passwords/reset.blade.php),
+  [`status/show.blade.php`](resources/views/status/show.blade.php),
+  [`status/unlock.blade.php`](resources/views/status/unlock.blade.php),
+  [`status/_history.blade.php`](resources/views/status/_history.blade.php),
+  [`errors/404.blade.php`](resources/views/errors/404.blade.php),
+  [`errors/429.blade.php`](resources/views/errors/429.blade.php),
+  [`errors/500.blade.php`](resources/views/errors/500.blade.php),
+  [`welcome.blade.php`](resources/views/welcome.blade.php).
+- Component adoption: `x-ui.button` (admin logout, auth submit, unlock submit), `x-ui.alert`
+  (login/password-reset flash, status-unlock error), `x-ui.input` inside `x-form.field`
+  (password-reset request + reset forms). Status pages render token surfaces directly.
+- Error pages (which ship their own minimal inline stylesheet) now include the no-FOUC
+  theme bootstrap and carry explicit `html.dark` rules so they honour OS dark preference.
+- `status/show.blade.php` now includes the theme bootstrap so the public page follows the
+  OS dark preference (it has no theme switcher by design).
+
+### Notes
+
+- The legacy `html.dark` bridge in `app.css` is intentionally left in place (Phase 3d removes it).
+- `x-admin-layout` nav was **not** restructured — only colours/tokens changed (Phase 4 owns the
+  sidebar). The `theme-switcher` component keeps its own `dark:` utilities (out of scope).
+- The modal keeps its Alpine `modal` component API, `name` prop, `x-data="modal"`, focus trap,
+  Escape/backdrop close and `aria-*` wiring unchanged.
+
+### Tests
+
+- Added [`SharedShellDarkModeTest`](tests/Feature/Ui/SharedShellDarkModeTest.php) (6 tests):
+  login, password-reset request/form, status show/unlock and the 404/429/500 error pages render
+  tokenised surfaces (`text-text`/`bg-surface`) and no longer carry the old light-only
+  card/section/button/divider combinations. The theme bootstrap + switcher inclusion is asserted
+  preserved (switcher absent on public status pages by design).
+- Full suite: 605 passed (baseline 599 + 6 new). `ErrorPageTest` and the `StatusPage/*` suites
+  remain green unchanged.
+
 ## [2026-10-04] — Dark-mode token migration: dashboard, websites, incidents (Phase 3a)
 
 ### Changed (presentation only — no route/controller/model/behaviour change)

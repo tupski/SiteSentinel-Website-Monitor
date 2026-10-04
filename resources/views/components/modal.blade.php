@@ -34,13 +34,13 @@
             x-show="open"
             x-transition
             tabindex="-1"
-            class="relative w-full {{ $maxWidth }} rounded-lg bg-white p-6 shadow-xl focus:outline-none"
+            class="relative w-full {{ $maxWidth }} rounded-lg border border-border bg-surface-elevated p-6 shadow-xl focus:outline-none"
         >
             @if ($title)
                 <div class="mb-4 flex items-start justify-between gap-4">
-                    <h2 id="{{ $name }}-modal-title" class="text-lg font-semibold text-slate-900">{{ $title }}</h2>
+                    <h2 id="{{ $name }}-modal-title" class="text-lg font-semibold text-text">{{ $title }}</h2>
                     <button type="button" x-on:click="close()" aria-label="{{ __('Close') }}"
-                            class="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500">
+                            class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                         <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
                         </svg>
@@ -48,7 +48,7 @@
                 </div>
             @endif
 
-            <div class="text-sm text-slate-700">
+            <div class="text-sm text-text-muted">
                 {{ $slot }}
             </div>
 
