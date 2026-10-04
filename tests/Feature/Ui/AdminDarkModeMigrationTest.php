@@ -166,4 +166,125 @@ final class AdminDarkModeMigrationTest extends TestCase
         $this->assertStringContainsString('bg-success-muted', $html);
         $this->assertStringContainsString('Saved successfully.', $html);
     }
+
+    // -----------------------------------------------------------------------
+    // Phase 3b — notifications, status pages and status settings.
+    // -----------------------------------------------------------------------
+
+    private function emailChannel(): NotificationChannel
+    {
+        return NotificationChannel::create([
+            'type' => 'email',
+            'name' => 'Ops mail',
+            'enabled' => true,
+            'config' => [
+                'recipients' => ['ops@example.test'],
+                'host' => 'smtp.example.test',
+                'port' => 587,
+                'encryption' => 'tls',
+                'from_address' => 'alerts@example.test',
+                'from_name' => 'SiteSentinel',
+                'min_severity' => 'WARNING',
+            ],
+            'secret_ref' => 'smtp-secret-value',
+        ]);
+    }
+
+    public function test_notification_channels_index_uses_theme_aware_table(): void
+    {
+        $this->emailChannel();
+
+        $html = $this->html('admin.notifications.index');
+
+        $this->assertStringContainsString('overflow-x-auto', $html);
+        $this->assertStringContainsString('bg-surface-elevated', $html);
+        $this->assertStringContainsString('bg-surface-muted', $html);
+
+        // The push opt-in card adopts the shared elevated surface.
+        $this->assertStringContainsString('border-border', $html);
+
+        // Old view-local light-only surfaces gone.
+        $this->assertStringNotContainsString('bg-white shadow-sm', $html);
+        $this->assertStringNotContainsString('divide-slate-200', $html);
+        $this->assertStringNotContainsString('rounded bg-slate-900', $html);
+    }
+
+    public function test_notification_channel_form_uses_theme_aware_controls(): void
+    {
+        $html = $this->html('admin.notifications.create');
+
+        // Tokenised form card + controls.
+        $this->assertStringContainsString('bg-surface-elevated', $html);
+        $this->assertStringContainsString('border-border-muted', $html);
+        $this->assertStringContainsString('focus:ring-focus', $html);
+
+        // Alpine type-conditional bindings survive the migration.
+        $this->assertStringContainsString("x-show=\"type === 'email'\"", $html);
+        $this->assertStringContainsString("x-bind:disabled=\"type !== 'email'\"", $html);
+
+        // No secret is echoed back into the form.
+        $this->assertStringContainsString('name="secret_ref"', $html);
+        $this->assertStringNotContainsString('smtp-secret-value', $html);
+
+        $this->assertStringNotContainsString('bg-white shadow-sm', $html);
+        $this->assertStringNotContainsString('rounded border border-slate-300', $html);
+        $this->assertStringNotContainsString('divide-slate-200', $html);
+    }
+
+    public function test_delivery_log_index_uses_theme_aware_table_and_filters(): void
+    {
+        $html = $this->html('admin.notification-logs.index');
+
+        $this->assertStringContainsString('overflow-x-auto', $html);
+        $this->assertStringContainsString('bg-surface-elevated', $html);
+        $this->assertStringContainsString('bg-surface-muted', $html);
+
+        // Filter bar adopts the token surface.
+        $this->assertStringContainsString('border-border', $html);
+
+        $this->assertStringNotContainsString('bg-white shadow-sm', $html);
+        $this->assertStringNotContainsString('divide-slate-200', $html);
+        $this->assertStringNotContainsString('rounded bg-slate-900', $html);
+    }
+
+    public function test_status_pages_index_uses_theme_aware_table(): void
+    {
+        $html = $this->html('admin.status-pages.index');
+
+        $this->assertStringContainsString('overflow-x-auto', $html);
+        $this->assertStringContainsString('bg-surface-elevated', $html);
+        $this->assertStringContainsString('bg-surface-muted', $html);
+
+        $this->assertStringNotContainsString('bg-white shadow-sm', $html);
+        $this->assertStringNotContainsString('divide-slate-200', $html);
+        $this->assertStringNotContainsString('rounded bg-slate-900', $html);
+    }
+
+    public function test_status_page_form_uses_theme_aware_controls_and_warning_alert(): void
+    {
+        $html = $this->html('admin.status-pages.create');
+
+        $this->assertStringContainsString('bg-surface-elevated', $html);
+        $this->assertStringContainsString('bg-warning-muted', $html);
+
+        // Shared password fields (also fixing status-settings) moved onto tokens.
+        $this->assertStringContainsString('border-border-muted', $html);
+
+        $this->assertStringNotContainsString('bg-white shadow-sm', $html);
+        $this->assertStringNotContainsString('rounded border border-slate-300', $html);
+        $this->assertStringNotContainsString('bg-amber-50', $html);
+    }
+
+    public function test_status_settings_form_uses_theme_aware_controls_and_warning_alert(): void
+    {
+        $html = $this->html('admin.status-settings.edit');
+
+        $this->assertStringContainsString('bg-surface-elevated', $html);
+        $this->assertStringContainsString('bg-warning-muted', $html);
+        $this->assertStringContainsString('border-border-muted', $html);
+
+        $this->assertStringNotContainsString('bg-white shadow-sm', $html);
+        $this->assertStringNotContainsString('rounded border border-slate-300', $html);
+        $this->assertStringNotContainsString('bg-amber-50', $html);
+    }
 }
