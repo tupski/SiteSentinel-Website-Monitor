@@ -1,5 +1,52 @@
 # Changelog
 
+## [2026-10-04] — Collapsible sidebar shell + top bar + profile dropdown (Phase 4)
+
+### Changed
+
+- **Admin shell rebuilt as a collapsible sidebar (ADR-036).** The horizontal admin nav in
+  [`resources/views/components/admin-layout.blade.php`](resources/views/components/admin-layout.blade.php)
+  is replaced by a fixed left sidebar (desktop) / off-canvas drawer (mobile), a sticky top bar, and a
+  `<main>` content column. No route, controller, request or model changed; every existing URL still
+  resolves.
+- The `<title>` now renders the component `title` slot (`{{ $title ?? '…' }}`) instead of the legacy
+  `@yield('title')`, which never received it.
+
+### Added
+
+- [`resources/views/components/admin-sidebar.blade.php`](resources/views/components/admin-sidebar.blade.php) —
+  grouped nav built from real named routes only (Dashboard; Monitoring: Websites/Incidents;
+  Notifications: Notification/Delivery log; Status pages; Administration: Profile/Settings/Documentation).
+  Each item carries `aria-label` + `title` (so the collapsed rail is never ambiguous) and the active
+  route sets `aria-current="page"` plus a left indicator bar + heavier weight (non-colour marker).
+- [`resources/views/components/profile-dropdown.blade.php`](resources/views/components/profile-dropdown.blade.php) —
+  initials-avatar trigger (`aria-haspopup="menu"`, `aria-expanded`, accessible name) with the admin name,
+  email, "View / Edit Profile", "Settings", and a real **POST** logout form (`@csrf`, `route('logout')`).
+- Two Alpine components registered in [`resources/js/app.js`](resources/js/app.js): `sidebar`
+  (collapse/expand + `localStorage['sentinel.sidebar']` persistence + mobile drawer + focus trap) and
+  `profileMenu` (roving-focus dropdown, outside-click/Escape close, focus return) — no inline Blade logic.
+- Collapse/expand CSS in [`resources/css/app.css`](resources/css/app.css): the rail width and right-column
+  offset are two custom properties toggled by a single `is-collapsed` class on `#admin-shell`.
+- Skip-to-content link, `<aside>`/`<nav>`/`<header>`/`<main>` landmarks, and accessible names on every
+  icon-only control.
+- [`tests/Feature/Ui/AdminSidebarTest.php`](tests/Feature/Ui/AdminSidebarTest.php) — nav labels + real
+  route hrefs, labelled landmark, collapse toggle `aria-expanded` + accessible name, Alpine wiring,
+  `aria-current="page"` + non-colour indicator on dashboard/websites/settings/documentation, profile
+  dropdown identity/links/POST logout, mobile drawer toggle + labelled dialog, and route-resolution smoke
+  coverage.
+
+### Notes
+
+- Tokens only (`bg-surface*`, `text-text*`, `border-border*`) — no `dark:`-duplicated colours; Light and
+  Dark both verified headlessly. No new dependencies. The `/admin` auth guard is unchanged.
+
+### Verification
+
+- `vendor/bin/pint --dirty` clean; full suite **667 passed** (was 645; +22 new); `npm run build` succeeds.
+- Headless (Playwright, built CSS): desktop expanded/collapsed in Light + Dark, ~375px mobile drawer in
+  both themes, profile dropdown open/roving-focus/Escape, collapse persistence across reload, no
+  horizontal overflow at 1054px / 1440px / 375px.
+
 ## [2026-10-04] — Admin documentation page (Phase 7)
 
 ### Added

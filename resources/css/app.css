@@ -172,3 +172,55 @@
         accent-color: var(--primary);
     }
 }
+
+/* ---------------------------------------------------------------------------
+ * Admin shell — collapsible sidebar (Phase 4).
+ *
+ * The sidebar is a fixed left rail at `md` and up; the right column is pushed
+ * by the rail's width. Collapsed state is a single class on `#admin-shell`
+ * (`is-collapsed`, toggled by the `sidebar` Alpine component), so the JS never
+ * has to know the widths. Below `md` the rail is hidden and the same nav is
+ * rendered inside the off-canvas drawer instead.
+ * ------------------------------------------------------------------------- */
+@layer components {
+    #admin-shell {
+        --admin-rail: 16rem;
+        --admin-rail-collapsed: 4.5rem;
+    }
+
+    #admin-shell.is-collapsed {
+        --admin-rail: var(--admin-rail-collapsed);
+    }
+
+    @media (min-width: 768px) {
+        #admin-sidebar {
+            width: var(--admin-rail);
+        }
+
+        #admin-main {
+            padding-left: var(--admin-rail);
+        }
+
+        #admin-sidebar,
+        #admin-main {
+            transition: width 150ms ease, padding-left 150ms ease;
+        }
+
+        /* Collapsed: icon-only rail — labels out, items centred. */
+        #admin-shell.is-collapsed #admin-sidebar [data-sidebar-label] {
+            display: none;
+        }
+
+        #admin-shell.is-collapsed #admin-sidebar [data-nav-item] {
+            justify-content: center;
+            gap: 0;
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+        }
+
+        #admin-shell.is-collapsed #admin-sidebar .px-3 {
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+        }
+    }
+}

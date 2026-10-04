@@ -1043,6 +1043,64 @@ arbitrary keys is rejected, not silently stored.
 
 ---
 
+## ADR-036: Admin shell = collapsible sidebar + top bar + profile dropdown (Phase 4)
+
+**Status** — Accepted (implemented)
+
+**Context** — The Phase 1–7 admin shell rendered navigation as a single horizontal bar inside
+[`resources/views/components/admin-layout.blade.php`](resources/views/components/admin-layout.blade.php).
+As the menu grew (nine items), the bar wrapped and crowded the theme switcher and the bare logout
+button, and it had no active-page marker, no persistence of a user preference, and no accessible
+collapsed/mobile form. No route, controller, request or model is involved: this is presentation only.
+
+**Decision** — Replace the horizontal nav with a collapsible, accessible shell, without touching any
+route, controller, request or business logic:
+
+- **Fixed left sidebar** at `md` and up, collapsing to an icon-only rail. Collapsed state is a single
+  `is-collapsed` class on `#admin-shell` (toggled by the `sidebar` Alpine component); the rail width
+  and the right-column offset are driven by two CSS custom properties in
+  [`resources/css/app.css`](resources/css/app.css), so the JS never encodes widths.
+- **Persisted preference** — `localStorage['sentinel.sidebar']` (`'collapsed'` / `'expanded'`), read on
+  `sidebar.init()` so the choice survives Turbo navigation and full reloads. This mirrors the theme
+  store's `theme` key style (ADR-033).
+- **Active state** — the current route sets `aria-current="page"` on its nav item and adds a left
+  indicator bar (`data-active-indicator`) plus a heavier font weight, so the marker is not colour-only
+  and works in both expanded and collapsed modes and both themes.
+- **Mobile drawer** — below `md` the same nav renders in an off-canvas `role="dialog"` drawer opened by
+  a hamburger; it closes on backdrop click, Escape and navigation, traps focus while open, moves focus
+  into the drawer on open and returns it to the toggle on close (the `modal` focus-trap pattern,
+  ADR-034).
+- **Top bar** — hamburger (mobile) + collapse toggle (desktop) + brand + the existing icon-only
+  `x-theme-switcher` + a new `x-profile-dropdown`.
+- **Profile dropdown** — replaces the bare logout button. The trigger is an initials avatar
+  (`aria-haspopup="menu"` + `aria-expanded` + accessible name); the menu shows the admin's name and
+  email, a "View / Edit Profile" link, a "Settings" link, and a real **POST** logout form
+  (`@csrf`, `route('logout')`) — logout semantics are unchanged.
+- **Landmarks** — `<nav>`/labelled `<aside>` for the sidebar, `<header>` for the top bar, `<main>` for
+  content, plus a skip-to-content link. All icon-only controls carry an accessible name; collapsed nav
+  items keep their `aria-label` + `title` so the rail is never ambiguous.
+- Both new Alpine components (`sidebar`, `profileMenu`) are registered in
+  [`resources/js/app.js`](resources/js/app.js) — not inline in Blade attributes — following ADR-034.
+- The `<title>` now renders the component `title` slot (`{{ $title ?? '…' }}`) instead of the legacy
+  `@yield('title')`, which never received the slot. Route names, controllers and all existing URLs are
+  unchanged; every nav item links to a real named route.
+
+**Alternatives considered** — Keeping the horizontal nav and only adding overflow handling (rejected:
+does not scale and gives no collapsed/mobile form); a JS/CSS-only sidebar without a registered Alpine
+component (rejected: focus-trap + persistence logic does not belong inline, ADR-034); a new dependency
+for the drawer/dropdown (rejected: no new dependencies, AGENTS.md §6).
+
+**Consequences** — *Positive:* scalable navigation, a clear non-colour active marker, a persisted
+preference, an accessible collapsed rail and mobile drawer, and a profile menu that keeps logout a real
+POST. *Negative:* the shell now depends on two small Alpine components and a handful of scoped CSS
+custom properties; the mobile drawer duplicates the nav markup (both copies must stay in sync via the
+shared `x-admin-sidebar` component, which they do).
+
+**Related** — [`ARCHITECTURE.md`](ARCHITECTURE.md) §14 (web/UI plane); ADR-002; ADR-033; ADR-034;
+[`AGENTS.md`](AGENTS.md) §15.4 (the `/admin` guard is unchanged).
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions
