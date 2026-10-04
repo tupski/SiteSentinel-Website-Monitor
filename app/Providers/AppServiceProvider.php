@@ -9,6 +9,7 @@ use App\Services\Audit\PruningAuditRecorder;
 use App\Services\Notifications\Channels\EmailProvider;
 use App\Services\Notifications\Channels\TelegramProvider;
 use App\Services\Notifications\NotificationProviderRegistry;
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Database\Events\ModelPruningFinished;
 use Illuminate\Database\Events\ModelPruningStarting;
 use Illuminate\Database\Events\ModelsPruned;
@@ -23,6 +24,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(NotificationProviderRegistry::class);
+
+        // System settings store (ADR-035): a singleton so the resolved map is
+        // memoized once per request on top of the version-counter cache.
+        $this->app->singleton(SettingsRepository::class);
 
         // Provider registry: type=>class map email/telegram. Container
         // resolution; unknown type fails closed in the dispatcher.

@@ -470,6 +470,12 @@ Purpose: key/value application settings, encrypted where sensitive.
 
 Keys/indexes: PK `id`; `uq_settings_key` (`key`).
 
+**Phase 6 (ADR-035) — implemented.** Migration `0001_12_01_000000_create_settings_table.php` creates
+this table verbatim. `App\Services\Settings\SettingsRepository` is the only read/write surface: it owns
+the key registry (group, type, default resolver) and resolves a missing key to a config-derived default,
+so a missing row never breaks a read. `is_encrypted` is carried for forward compatibility but is **not**
+used at MVP — no secret is stored here (presentational/identity settings only).
+
 Canonical settings keys (examples): `retention.checks_days` (30, allowed 30/60/90),
 `retention.incidents_days` (365), `retention.notification_logs_days` (90),
 `retention.snapshots_days` (14), `scoring.threshold_info` (1), `scoring.threshold_warning` (8),

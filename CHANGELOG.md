@@ -1,5 +1,67 @@
 # Changelog
 
+## [2026-10-04] — System settings (Phase 6, ADR-035)
+
+### Added
+
+- **Settings architecture (ADR-035).** Implemented the `settings` key/value table frozen in
+  [`DATABASE.md`](DATABASE.md) §3.17 — `id`, `key` VARCHAR(191) unique (`uq_settings_key`),
+  `value` TEXT nullable, `is_encrypted` TINYINT(1) default 0, timestamps. Migration
+  `0001_12_01_000000_create_settings_table.php` (guarded by `Schema::hasTable`).
+- [`app/Models/Setting.php`](app/Models/Setting.php) — thin model with a typed `castValue()` helper.
+- [`app/Services/Settings/SettingsRepository.php`](app/Services/Settings/SettingsRepository.php) —
+  the key registry (group, type, default resolver, write guard). Missing rows resolve to config-derived
+  defaults (`site_name` → `config('app.name')`, `timezone` → `config('app.timezone')`), so a read never
+  breaks. Cached behind a version counter that is bumped on every write; in-request memoized.
+- Global `settings()` helper ([`app/Support/helpers.php`](app/Support/helpers.php), registered in
+  [`composer.json`](composer.json) `autoload.files`) + a container singleton binding in
+  [`app/Providers/AppServiceProvider.php`](app/Providers/AppServiceProvider.php).
+- [`database/seeders/SettingSeeder.php`](database/seeders/SettingSeeder.php) — idempotent
+  (`firstOrCreate` by key, never clobbers an operator value), wired into `DatabaseSeeder`.
+- Admin-protected settings area in the existing `auth` + `session.timeouts` + `admin` group of
+  [`routes/web.php`](routes/web.php): `GET admin/settings` (`admin.settings.edit`) and
+  `PUT admin/settings` (`admin.settings.update`).
+- [`app/Http/Controllers/Admin/SystemSettingController.php`](app/Http/Controllers/Admin/SystemSettingController.php)
+  + [`app/Http/Requests/UpdateSystemSettingsRequest.php`](app/Http/Requests/UpdateSystemSettingsRequest.php)
+  (fixed key whitelist, image mime/extension/size validation, `DateTimeZone::listIdentifiers()`
+  timezone whitelist). Uploads are stored on the public disk under generated names; the previous file is
+  deleted only after a successful replace.
+- [`resources/views/admin/settings/edit.blade.php`](resources/views/admin/settings/edit.blade.php) —
+  General / Branding / System cards built from `x-ui.card` / `x-form.field` / `x-ui.input` /
+  `x-ui.textarea` / `x-ui.select` / `x-ui.checkbox` / `x-ui.button` / `x-ui.alert`, semantic tokens only
+  (dark-mode correct), `enctype="multipart/form-data"`, accessible current-logo/favicon previews with a
+  replace/remove control. "Settings" link added to the admin shell nav.
+- [`tests/Feature/Admin/SystemSettingsTest.php`](tests/Feature/Admin/SystemSettingsTest.php): guest
+  redirect + non-admin 403, page render, persistence through the accessor, invalid timezone / too-long
+  name / invalid mime / oversized upload rejection, config-derived defaults on an empty table, seeder
+  idempotency, upload store + replace (old file removed) + favicon removal, and the secret boundary
+  (arbitrary / infrastructure keys are never written; the repository rejects unregistered keys).
+
+### Settings exposed
+
+`site_name`, `site_description`, `site_logo`, `favicon`, `timezone` — presentational/identity only.
+
+### Not exposed (deliberately)
+
+`APP_KEY`, DB credentials, SMTP/mail passwords, Telegram/VAPID/API secrets, Redis/queue credentials and
+every other infrastructure secret stay in `.env`/config. The request validates a fixed whitelist and the
+repository rejects unregistered keys, so posting them is rejected, not stored.
+
+### Notes
+
+- **Date format:** no `date_format`/`datetime_display` setting was added. There is no centralized date
+  formatter in the app; every view formats its own timestamps, so wiring a global date format would
+  require touching unrelated presentation code for no user-facing gain. It is intentionally deferred.
+- **Timezone** is stored and validated but is **not** applied to `config('app.timezone')` at runtime
+  (that is a boot-time `.env` value). It is persisted as the admin's declared display preference for
+  future consumption; the setting is real and validated, not a placeholder for a broken feature.
+
+### Verification
+
+- `php vendor/bin/pint --dirty` green. `npm run build` green.
+- Full suite: **637 passed** (baseline 621 + 16 new).
+- `php artisan migrate:fresh --seed` green; a second `db:seed` re-run inserted nothing (idempotent).
+
 ## [2026-10-04] — Admin profile page + password change (Phase 5)
 
 ### Added

@@ -981,6 +981,68 @@ only — never an inline probe (AGENTS.md §9).
 
 ---
 
+---
+
+## ADR-035: System settings — key/value `settings` table with a cached typed repository
+
+**Status** — Accepted
+
+**Context** — Phase 6 introduces an admin-editable system settings area (site identity, branding
+images, timezone). `DATABASE.md` §3.17 already freezes a key/value `settings` table (`key` unique,
+`value` TEXT nullable, `is_encrypted`, `uq_settings_key`), reserved for "key/value application
+settings, encrypted where sensitive", but no migration or model was ever shipped. The closest
+existing precedent is the singleton-shaped `StatusPage`/`status_page_settings` pair, resolved with
+`firstOrCreate` and no defaults table. Nothing may duplicate the existing `config/*.php` + `.env`
+surface, and no infrastructure secret may become admin-writable.
+
+**Decision** — Implement `settings` verbatim to `DATABASE.md` §3.17 and read/write through a single
+cached repository:
+
+- Migration `0001_12_01_000000_create_settings_table.php` creates `settings` (`id`, `key`
+  VARCHAR(191) unique `uq_settings_key`, `value` TEXT nullable, `is_encrypted` TINYINT(1) default 0,
+  timestamps) exactly as frozen, guarded by `Schema::hasTable` for rollback safety.
+- [`app/Models/Setting.php`](app/Models/Setting.php) is a thin model (`key` + `value` fillable,
+  `is_encrypted` boolean cast) with a typed `castValue()` helper for `bool`/`int`/`float`/`json`.
+- [`app/Services/Settings/SettingsRepository.php`](app/Services/Settings/SettingsRepository.php) owns
+  the key registry: each key declares its group, type, validation bounds and a **default resolver**
+  that falls back to `config()` (`site_name` → `config('app.name')`, `timezone` →
+  `config('app.timezone')`). `get()`/`bool()`/`int()` return the stored value or the default, so a
+  missing row can never break a read; `set()`/`forget()` validate against the registry and invalidate
+  a version-counter cache namespace (including the `array` store used by tests).
+- A global `settings()` helper plus container singleton binding in
+  [`app/Providers/AppServiceProvider.php`](app/Providers/AppServiceProvider.php).
+- [`database/seeders/SettingSeeder.php`](database/seeders/SettingSeeder.php) is idempotent via
+  `firstOrCreate(['key' => ...], ['value' => ...])` — a re-run never clobbers an operator's value.
+- Admin surface: `GET/PUT admin/settings` (`admin.settings.edit`/`admin.settings.update`) inside the
+  existing `auth` + `session.timeouts` + `admin` group, `SystemSettingController` +
+  `UpdateSystemSettingsRequest`, and `resources/views/admin/settings/edit.blade.php`.
+
+**Alternatives considered** — (B) a single-row `system_settings` table with explicit typed columns
+(rejected: every new setting needs a migration, and a missing row needs a per-column default anyway);
+reusing `config/sentinel.php` + `.env` as an admin-writable store (rejected: config is frozen at
+boot, not runtime-editable, and writing it would blur the secret boundary); folding settings into
+`status_pages` (rejected: page-scoped, not system-scoped).
+
+**Reason** — The key/value shape is already the frozen schema, so this is completion rather than
+invention. Missing keys degrade to config-derived defaults, new keys are one registry entry with no
+schema change, and reads are a single cached array.
+
+**Consequences** — *Positive:* extensible with no further migrations, safe on a missing row, one
+cache read per request, one obvious place to add a setting. *Negative:* values are untyped in the
+database, so the repository — not the schema — guarantees types; `is_encrypted` is carried in the
+schema but is **not** used to store secrets at MVP (see below).
+
+**Secret boundary (explicit)** — Only presentational/identity settings are exposed:
+`site_name`, `site_description`, `site_logo`, `favicon`, `timezone`. `APP_KEY`, DB credentials,
+SMTP/mail passwords, Telegram/VAPID/API secrets, Redis/queue credentials and every other
+infrastructure secret stay in `.env`/config and are **not** writable through this endpoint. The
+request validates a fixed key whitelist and the controller writes only registered keys, so posting
+arbitrary keys is rejected, not silently stored.
+
+**Related** — [`DATABASE.md`](DATABASE.md) §3.17; [`SECURITY.md`](SECURITY.md) §4; ADR-002; ADR-034.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions

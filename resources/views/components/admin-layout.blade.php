@@ -20,6 +20,7 @@
                     <a href="{{ route('admin.notifications.index') }}" class="text-text-muted hover:text-text">{{ __('Notification') }}</a>
                     <a href="{{ route('admin.notification-logs.index') }}" class="text-text-muted hover:text-text">{{ __('Delivery log') }}</a>
                     <a href="{{ route('admin.status-pages.index') }}" class="text-text-muted hover:text-text">{{ __('Status pages') }}</a>
+                    <a href="{{ route('admin.settings.edit') }}" class="text-text-muted hover:text-text">{{ __('Settings') }}</a>
                 </nav>
             </div>
             <div class="flex items-center gap-4">

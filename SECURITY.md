@@ -759,7 +759,9 @@ enqueued — no probe runs in the request path), `notification.channel_created` 
 `notification.channel_updated` / `notification.channel_deleted` (admin channel management),
 `notification.channel_disabled` (circuit breaker — see [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §9),
 `auth.profile.updated` (an admin changed their own name/email), and `auth.password.changed`
-(an admin changed their own password via the profile — the value is never recorded).
+(an admin changed their own password via the profile — the value is never recorded). System settings
+changes emit the canonical `settings.changed` (`AuditEvent::SETTINGS_CHANGED`) with the field-name list
+only — never the values, and never any secret (the endpoint cannot write one; ADR-035).
 
 ### 9.2 Where events go, and the separation rule
 

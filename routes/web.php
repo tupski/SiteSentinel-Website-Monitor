@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\ProfileController;
 use App\Http\Controllers\Admin\PushSubscriptionController;
 use App\Http\Controllers\Admin\StatusPageController as AdminStatusPageController;
 use App\Http\Controllers\Admin\StatusPageSettingController;
+use App\Http\Controllers\Admin\SystemSettingController;
 use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\Auth\LoginController;
@@ -89,6 +90,12 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
     Route::get('profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::put('profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::put('profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
+
+    // Phase 6 (ADR-035): system settings — site identity, branding, timezone.
+    // Fixed key whitelist + registered-only writes: no infrastructure secret is
+    // writable here. Admin-only via the group's `auth` + `session.timeouts` + `admin`.
+    Route::get('settings', [SystemSettingController::class, 'edit'])->name('settings.edit');
+    Route::put('settings', [SystemSettingController::class, 'update'])->name('settings.update');
 
     // Phase 11 (ADR-031): multi-page CRUD. Delete is guarded in the controller
     // (never the last/default page; websites fall back via ON DELETE SET NULL).

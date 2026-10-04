@@ -22,5 +22,6 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(DetectionRuleSeeder::class);
         $this->call(StatusPageSeeder::class);
+        $this->call(SettingSeeder::class);
     }
 }

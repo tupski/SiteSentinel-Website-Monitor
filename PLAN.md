@@ -1196,6 +1196,10 @@ check trigger, and the shared UI primitives — all additively, leaving Phases 0
 - **Shared UI primitives (`ADR-034`).** `x-form.field`, `x-modal`, `x-per-page` selector with a
   validated whitelist helper, icon-button convention, modal-gated deletes.
 - **Manual check trigger (`FR-103`).** Admin-triggered check outside cadence, rate-limited.
+- **System settings (`ADR-035`).** Implement the frozen `settings` key/value table
+  ([`DATABASE.md`](DATABASE.md) §3.17) with a cached typed `SettingsRepository` + `settings()` helper;
+  admin-protected General/Branding/System page for `site_name`, `site_description`, `site_logo`,
+  `favicon` and `timezone`. No infrastructure secret is writable (fixed key whitelist).
 
 **Out of scope for this phase:**
 
