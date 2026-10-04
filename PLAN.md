@@ -855,6 +855,15 @@ Deliver the provider-independent notification dispatcher with Email and Telegram
 - [x] CI green; no regression to Phase 6 (same 5 pre-existing `sessions` failures; zero new failures).
 - [x] Docs updated if cooldown defaults deviated from [`NOTIFICATIONS.md`](NOTIFICATIONS.md) (no deviation: `SENTINEL_DEFAULT_COOLDOWN_MINUTES=15`).
 
+### Addendum — Admin documentation page
+
+An admin-only **Documentation** page (`GET admin/documentation`, `admin.documentation`) was added under the
+same `auth` + `session.timeouts` + `admin` group. It documents the system as implemented — including the
+availability-vs-security status model, settings, profile, navigation, monitoring, detection and the
+notification pipeline — plus a dedicated step-by-step Telegram Bot setup (BotFather → token → Chat ID →
+`/start` → channel fields → enable → test → verify) and troubleshooting. Read-only, no business logic
+change; see CHANGELOG for details.
+
 ### Risks / Watch-outs
 
 - Cooldown state must survive restarts (`NFR-09`) — persist in `notification_cooldowns`, not memory.

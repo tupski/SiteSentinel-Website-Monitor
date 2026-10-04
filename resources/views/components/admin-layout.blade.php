@@ -10,17 +10,18 @@
 </head>
 <body class="min-h-screen bg-surface text-text antialiased">
     <header class="border-b border-border bg-surface-elevated">
-        <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-            <div class="flex items-center gap-6">
+        <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-1">
                 <a href="{{ route('admin.dashboard') }}" class="text-lg font-bold tracking-tight text-text">SiteSentinel</a>
-                <nav class="flex items-center gap-4 text-sm">
-                    <a href="{{ route('admin.dashboard') }}" class="text-text-muted hover:text-text">{{ __('Dashboard') }}</a>
-                    <a href="{{ route('admin.websites.index') }}" class="text-text-muted hover:text-text">{{ __('Websites') }}</a>
-                    <a href="{{ route('admin.incidents.index') }}" class="text-text-muted hover:text-text">{{ __('Incidents') }}</a>
-                    <a href="{{ route('admin.notifications.index') }}" class="text-text-muted hover:text-text">{{ __('Notification') }}</a>
-                    <a href="{{ route('admin.notification-logs.index') }}" class="text-text-muted hover:text-text">{{ __('Delivery log') }}</a>
-                    <a href="{{ route('admin.status-pages.index') }}" class="text-text-muted hover:text-text">{{ __('Status pages') }}</a>
-                    <a href="{{ route('admin.settings.edit') }}" class="text-text-muted hover:text-text">{{ __('Settings') }}</a>
+                <nav class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    <a href="{{ route('admin.dashboard') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Dashboard') }}</a>
+                    <a href="{{ route('admin.websites.index') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Websites') }}</a>
+                    <a href="{{ route('admin.incidents.index') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Incidents') }}</a>
+                    <a href="{{ route('admin.notifications.index') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Notification') }}</a>
+                    <a href="{{ route('admin.notification-logs.index') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Delivery log') }}</a>
+                    <a href="{{ route('admin.status-pages.index') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Status pages') }}</a>
+                    <a href="{{ route('admin.settings.edit') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Settings') }}</a>
+                    <a href="{{ route('admin.documentation') }}" class="text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">{{ __('Documentation') }}</a>
                 </nav>
             </div>
             <div class="flex items-center gap-4">

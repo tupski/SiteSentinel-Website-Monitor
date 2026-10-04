@@ -1,5 +1,43 @@
 # Changelog
 
+## [2026-10-04] — Admin documentation page (Phase 7)
+
+### Added
+
+- Admin-only in-app documentation: `GET admin/documentation` (`admin.documentation`) inside the existing
+  `auth` + `session.timeouts` + `admin` group of [`routes/web.php`](routes/web.php).
+- [`app/Http/Controllers/Admin/DocumentationController.php`](app/Http/Controllers/Admin/DocumentationController.php) —
+  thin controller returning the view (read-only; no persistence).
+- [`resources/views/admin/documentation/index.blade.php`](resources/views/admin/documentation/index.blade.php) —
+  Getting Started (incl. the availability-vs-security two-dimensional model and `HTTP 200 ≠ healthy`
+  warning), System Settings, Admin Profile, Navigation (each real menu area linked by route), Website
+  Monitoring, Detection / Security Rules, Notifications, a step-by-step **Telegram Bot setup** (BotFather →
+  token → Chat ID via `getUpdates` → `/start` → field placement → enable → test → verify) and
+  Troubleshooting. Built from `x-ui.card` / `x-ui.alert` / `x-ui.badge` / `x-ui.button` / `x-ui.input` and
+  semantic tokens only (Light + Dark correct).
+- A labelled client-side search box and a table-of-contents nav (sticky sidebar on desktop, in-flow list on
+  mobile) filter sections and their TOC entries together and restore them when cleared; the result count is
+  announced via `aria-live="polite"`. Code/URL examples scroll inside their own `overflow-x-auto`
+  container.
+- "Documentation" link added to the admin shell nav in
+  [`resources/views/components/admin-layout.blade.php`](resources/views/components/admin-layout.blade.php)
+  (nav now wraps instead of overflowing on narrow viewports).
+- [`tests/Feature/Admin/DocumentationTest.php`](tests/Feature/Admin/DocumentationTest.php) — guest
+  redirect + non-admin/disabled 403, admin render, the Telegram section and exact channel field labels
+  ("Chat ID", "Topic thread ID (optional)", "Secret (SMTP password or bot token)"), the `<TOKEN>`
+  placeholder with no real-token-shaped string, absence of placeholder copy, and an anti-drift guard
+  asserting every documented area resolves to a real named route.
+
+### Notes
+
+- **Accuracy over volume:** only implemented features are documented. The token is shown as a `<TOKEN>`
+  placeholder only; the guide states the bot token is a secret stored encrypted in `secret_ref` and that
+  the Chat ID is not a secret. Rule ids are referenced by shape only (e.g. `RULE-AV-002`), never invented.
+
+### Verification
+
+- `vendor/bin/pint --dirty` clean; full suite **645 passed** (was 637; +8 new); `npm run build` succeeds.
+
 ## [2026-10-04] — System settings (Phase 6, ADR-035)
 
 ### Added

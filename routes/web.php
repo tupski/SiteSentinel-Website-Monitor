@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\DocumentationController;
 use App\Http\Controllers\Admin\IncidentController;
 use App\Http\Controllers\Admin\NotificationChannelController;
 use App\Http\Controllers\Admin\ProfileController;
@@ -105,6 +106,10 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
     // §3.18). Editing still writes through to the default page.
     Route::get('status-settings', [StatusPageSettingController::class, 'edit'])->name('status-settings.edit');
     Route::put('status-settings', [StatusPageSettingController::class, 'update'])->name('status-settings.update');
+
+    // Phase 7: in-app operator documentation. Read-only, admin-only via the
+    // group's `auth` + `session.timeouts` + `admin` (same gate as every route here).
+    Route::get('documentation', [DocumentationController::class, 'index'])->name('documentation');
 });
 
 // Public status pages (Phase 8 → Phase 11, ADR-031). Same gate for HTML + JSON.
