@@ -15,10 +15,9 @@
     --radius-lg: 0.5rem;
 
     /* Legacy raw tokens (ADR-033). The flip-aware semantic layer lives below;
-       these remain only for `body` and the Phase-2 legacy bridge. */
+       these remain only for the `body` background. */
     --color-canvas: #f8fafc;
     --color-canvas-dark: #0f172a;
-    --color-surface-dark: #1e293b;
 }
 
 /* ---------------------------------------------------------------------------
@@ -171,35 +170,5 @@
     input[type='checkbox'],
     input[type='radio'] {
         accent-color: var(--primary);
-    }
-
-    /* -----------------------------------------------------------------------
-     * LEGACY BRIDGE — Phase 2 keeps these so unmigrated views stay coherent in
-     * dark mode. Phase 3 deletes each block as the views move onto the
-     * `bg-surface-*` / `text-text-*` / `border-border*` token utilities.
-     * --------------------------------------------------------------------- */
-    html.dark .bg-white {
-        background-color: var(--color-surface-dark);
-    }
-
-    html.dark .bg-slate-50 {
-        background-color: #172033;
-    }
-
-    html.dark .text-slate-900,
-    html.dark .text-slate-800,
-    html.dark .text-slate-700 {
-        color: #e2e8f0;
-    }
-
-    html.dark .text-slate-600,
-    html.dark .text-slate-500 {
-        color: #94a3b8;
-    }
-
-    html.dark .border-slate-200,
-    html.dark .border-slate-300,
-    html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
-        border-color: #334155;
     }
 }

@@ -24,7 +24,7 @@
         aria-label="{{ __('Change theme') }}"
         aria-haspopup="menu"
         aria-expanded="false"
-        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white dark:focus-visible:ring-slate-400"
+        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border-muted bg-surface-elevated text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
         {{-- Sun (light) --}}
         <svg x-show="$store.theme.mode === 'light'" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -49,9 +49,9 @@
         role="menu"
         aria-label="{{ __('Theme') }}"
         x-on:keydown.tab="trap($event)"
-        class="absolute right-0 z-20 mt-2 w-44 rounded-md border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-800"
+        class="absolute right-0 z-20 mt-2 w-44 rounded-md border border-border bg-surface-elevated p-1 shadow-lg"
     >
-        <div role="presentation" class="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <div role="presentation" class="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-subtle">
             {{ __('Theme') }}
         </div>
 
@@ -63,14 +63,14 @@
                 tabindex="-1"
                 aria-checked="false"
                 x-bind:aria-checked="$store.theme.mode === '{{ $mode }}' ? 'true' : 'false'"
-                x-bind:class="$store.theme.mode === '{{ $mode }}' ? 'bg-slate-100 font-medium text-slate-900 dark:bg-slate-700 dark:text-white' : 'text-slate-700 dark:text-slate-200'"
+                x-bind:class="$store.theme.mode === '{{ $mode }}' ? 'bg-surface-muted font-medium text-text' : 'text-text-muted'"
                 x-on:click="select('{{ $mode }}')"
                 x-on:keydown.arrow-down.prevent="move(1)"
                 x-on:keydown.arrow-up.prevent="move(-1)"
                 x-on:keydown.enter.prevent="select('{{ $mode }}')"
                 x-on:keydown.space.prevent="select('{{ $mode }}')"
                 x-on:keydown.escape.prevent="closeMenu(true)"
-                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-slate-100 focus:outline-none focus-visible:bg-slate-100 dark:hover:bg-slate-700 dark:focus-visible:bg-slate-700"
+                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
             >
                 @switch($mode)
                     @case('light')

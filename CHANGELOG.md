@@ -1,5 +1,55 @@
 # Changelog
 
+## [2026-10-04] — Dark-mode: delete the legacy `html.dark` bridge (Phase 3d)
+
+### Changed (presentation only — no route/controller/model/behaviour change)
+
+- Deleted the Phase-2 **LEGACY BRIDGE** block from
+  [`resources/css/app.css`](resources/css/app.css): the `html.dark .bg-white`,
+  `html.dark .bg-slate-50`, `html.dark .text-slate-{900,800,700}`,
+  `html.dark .text-slate-{600,500}`, `html.dark .border-slate-{200,300}` and
+  `html.dark .divide-slate-200` descendant overrides. The flip-aware token layer
+  (`:root` / `.dark` / `@theme inline`), the `@custom-variant dark` declaration and
+  the `html.dark body` base rule are untouched.
+- Removed the now-orphaned `--color-surface-dark` raw token (referenced only by the
+  bridge); `--color-canvas` / `--color-canvas-dark` remain for the `body` background.
+- Migrated the last light-only leftovers found by the audit:
+  [`components/theme-switcher.blade.php`](resources/views/components/theme-switcher.blade.php)
+  (trigger, menu panel, heading, active/resting menu items — dropped the raw
+  slate/white classes and the redundant `dark:` duplicates for
+  `border-border-muted` / `bg-surface-elevated` / `text-text*` / `bg-surface-hover`
+  / `bg-surface-muted` / `ring-focus`) and the
+  [`components/modal.blade.php`](resources/views/components/modal.blade.php) backdrop
+  scrim (`bg-slate-900/50` → theme-aware `bg-text/50`).
+- Reworded the stale card comment in
+  [`components/ui/card.blade.php`](resources/views/components/ui/card.blade.php) so the
+  audit stays clean (no code change).
+
+### Added
+
+- Regression test [`tests/Feature/Ui/NoLegacyDarkBridgeTest.php`](tests/Feature/Ui/NoLegacyDarkBridgeTest.php):
+  asserts `app.css` contains no `html.dark <utility>` overrides, the `.dark` token
+  layer still defines the dark surface values, and served views (login, dashboard,
+  websites index) carry no bare `bg-white` wrapper.
+
+### Notes
+
+- Email templates (`resources/views/emails/*.blade.php`) are deliberately **not**
+  rethemed — they are standalone inline-styled HTML where dark mode is a mail-client
+  concern.
+- The `x-admin-layout` shell still expresses its palette with Tailwind `dark:`
+  utilities (its sidebar/refresh is Phase 4's scope); that is independent of the
+  deleted bridge.
+
+### Verification
+
+- `npm run build` green; the removed override selectors are absent from the built
+  bundle while `--color-canvas-dark` and the `.dark` token block remain.
+- Full suite: **608 passed** (baseline 605 + 3 new).
+- Manual headless render of login / dashboard / table / form in **both** themes
+  (light + dark) showed no white cards in dark mode, no white table backgrounds,
+  no black-on-dark text, visible borders and readable controls.
+
 ## [2026-10-04] — Dark-mode token migration: shared shell, modal, auth, status & error pages (Phase 3c)
 
 ### Changed (presentation only — no route/controller/model/behaviour change)

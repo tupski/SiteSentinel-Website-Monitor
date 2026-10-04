@@ -25,7 +25,7 @@
             x-show="open"
             x-transition.opacity
             x-on:click="close()"
-            class="fixed inset-0 bg-slate-900/50"
+            class="fixed inset-0 bg-text/50"
             aria-hidden="true"
         ></div>
 

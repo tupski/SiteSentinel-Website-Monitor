@@ -4,8 +4,8 @@
     'padding' => true,
 ])
 
-{{-- Matches the existing `rounded-lg border border-slate-200 bg-white shadow-sm`
-     card language, expressed with flip-aware tokens. --}}
+{{-- The sitewide card surface: rounded-lg + hairline border + soft shadow,
+     expressed with flip-aware semantic tokens (see resources/css/app.css). --}}
 <div {{ $attributes->merge(['class' => 'overflow-hidden rounded-lg border border-border bg-surface-elevated shadow-sm']) }}>
     @if ($title || isset($actions))
         <div class="flex items-start justify-between gap-4 border-b border-border {{ $padding ? 'px-4 py-3' : 'p-0' }}">

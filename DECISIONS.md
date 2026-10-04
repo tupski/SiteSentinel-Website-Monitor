@@ -930,6 +930,17 @@ server-side-only persistence (rejected — round-trip before paint, FOUC).
 
 **Related** — [`ARCHITECTURE.md`](ARCHITECTURE.md) §14.2; ADR-002 (Tailwind + Alpine, no SPA).
 
+**Amendment (Phase 3d — legacy bridge removed)** — The Phase-2 migration shipped a temporary
+**LEGACY BRIDGE** in `resources/css/app.css`: `html.dark` descendant overrides that re-mapped a
+handful of light-only Tailwind utilities (`bg-white`, `bg-slate-50`, `text-slate-*`,
+`border-slate-*`, `divide-slate-200`) onto dark values so unmigrated views stayed coherent. Phases
+3a–3c moved every admin/auth/status/error surface onto the semantic token utilities, so the bridge
+was **deleted** (together with the now-orphaned `--color-surface-dark` raw token). The class-based
+dark variant (`@custom-variant dark`), the `:root` / `.dark` token scopes, the `@theme inline`
+mapping and the `html.dark body` base rule are unchanged; dark mode is now driven solely by the
+flip-aware tokens. The removal is guarded by
+[`tests/Feature/Ui/NoLegacyDarkBridgeTest.php`](tests/Feature/Ui/NoLegacyDarkBridgeTest.php).
+
 ---
 
 ## ADR-034: Shared UI primitives
