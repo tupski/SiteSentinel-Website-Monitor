@@ -33,7 +33,7 @@ final class StatusPageCache
         // so a serializing store (database/file/redis) would hand back a
         // `__PHP_Incomplete_Class` for a cached object. The array form survives
         // any store and is still "DTO only, never raw rows" (STATUS-PAGE.md §9).
-        /** @var array{banner: string, services: array<int, mixed>, updatedDayBucket: string} $payload */
+        /** @var array{banner: string, services: array<int, mixed>, updatedDayBucket: string, updatedAt: string} $payload */
         $payload = Cache::remember($key, $ttl, fn (): array => $this->projector->project($page)->toArray());
 
         return PublicStatusDTO::fromArray($payload);

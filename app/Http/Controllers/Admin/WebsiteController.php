@@ -12,6 +12,7 @@ use App\Jobs\RunWebsiteCheck;
 use App\Models\NotificationChannel;
 use App\Models\Website;
 use App\Services\Audit\AuditLogger;
+use App\Services\Notifications\AdminNotificationService;
 use App\Services\StatusPage\StatusPageCache;
 use App\Support\PerPage;
 use Illuminate\Http\RedirectResponse;
@@ -31,19 +32,63 @@ final class WebsiteController extends Controller
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly StatusPageCache $statusPageCache,
+        private readonly AdminNotificationService $adminNotifications,
     ) {}
+
+    /**
+     * Availability values accepted by the `status` filter. Mirrors the
+     * `websites.status_availability` ENUM plus `unknown` for the NULL case.
+     * Never trust the raw query value — anything outside this set is ignored
+     * (the list falls back to unfiltered), matching the incident filter idiom.
+     */
+    private const AVAILABILITY_FILTERS = ['UP', 'DOWN', 'unknown'];
 
     public function index(Request $request): View
     {
+        $statusFilter = $this->availabilityFilter($request);
+
         $query = Website::query()
             ->withTrashed(false) // only active (not soft-deleted)
+            // Eager-load the assigned status page so the association column
+            // renders without an N+1 (one query per page, not per row).
+            ->with('statusPage')
+            // Requirement 31: operational = `status_availability === 'UP'` (NOT
+            // `is_active`). Filtering happens on the real query so the list total
+            // equals the dashboard "Operational" counter.
+            ->when($statusFilter === 'UP', function ($query): void {
+                $query->where('status_availability', 'UP');
+            })
+            ->when($statusFilter === 'DOWN', function ($query): void {
+                $query->where('status_availability', 'DOWN');
+            })
+            ->when($statusFilter === 'unknown', function ($query): void {
+                $query->whereNull('status_availability');
+            })
             ->orderBy('name');
 
         $websites = $query
             ->paginate(PerPage::sizeFor($query, $request))
             ->withQueryString();
 
-        return view('admin.websites.index', compact('websites'));
+        return view('admin.websites.index', [
+            'websites' => $websites,
+            'statusFilter' => $statusFilter,
+        ]);
+    }
+
+    /**
+     * Resolve a whitelisted availability filter from the request. Unknown or
+     * malformed values resolve to null (no filter applied).
+     */
+    private function availabilityFilter(Request $request): ?string
+    {
+        $raw = $request->query('status');
+
+        if (! is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        return in_array($raw, self::AVAILABILITY_FILTERS, true) ? $raw : null;
     }
 
     public function create(): View
@@ -65,6 +110,14 @@ final class WebsiteController extends Controller
 
         $this->audit->log('website.created', $request->user(), $website);
         $this->statusPageCache->invalidate();
+
+        $this->adminNotifications->recordMonitoringConfigChanged(
+            'created',
+            'Website '.$website->name.' was added to monitoring.',
+            null,
+            (int) $website->id,
+            $request->user()?->getKey(),
+        );
 
         return redirect()
             ->route('admin.websites.index')
@@ -97,6 +150,14 @@ final class WebsiteController extends Controller
         // (STATUS-PAGE.md §9.2).
         $this->statusPageCache->invalidate();
 
+        $this->adminNotifications->recordMonitoringConfigChanged(
+            'updated',
+            'Monitoring settings for '.$website->name.' were updated.',
+            null,
+            (int) $website->id,
+            $request->user()?->getKey(),
+        );
+
         return redirect()
             ->route('admin.websites.index')
             ->with('status', __('Website updated.'));
@@ -106,11 +167,21 @@ final class WebsiteController extends Controller
     {
         $this->audit->log('website.deleted', $request->user(), $website);
 
+        $name = $website->name;
+        $websiteId = (int) $website->id;
         $website->delete();
 
         // Removing a website must drop it from the public page immediately,
         // not at the TTL (STATUS-PAGE.md §9.2).
         $this->statusPageCache->invalidate();
+
+        $this->adminNotifications->recordMonitoringConfigChanged(
+            'deleted',
+            'Website '.$name.' was removed from monitoring.',
+            null,
+            $websiteId,
+            $request->user()?->getKey(),
+        );
 
         return redirect()
             ->route('admin.websites.index')
@@ -131,6 +202,14 @@ final class WebsiteController extends Controller
         // `is_active` gates publication (StatusProjector::publishedQuery), so
         // toggling monitoring on/off must refresh the cached projection.
         $this->statusPageCache->invalidate();
+
+        $this->adminNotifications->recordMonitoringConfigChanged(
+            $website->is_active ? 'enabled' : 'disabled',
+            'Monitoring for '.$website->name.' was '.($website->is_active ? 'enabled' : 'disabled').'.',
+            null,
+            (int) $website->id,
+            $request->user()?->getKey(),
+        );
 
         return redirect()
             ->route('admin.websites.index')
@@ -196,6 +275,17 @@ final class WebsiteController extends Controller
 
         $this->statusPageCache->invalidate();
 
+        $this->adminNotifications->recordMonitoringConfigChanged(
+            'bulk_deleted',
+            trans_choice(
+                '{1} A website was removed from monitoring.|[2,*] :count websites were removed from monitoring.',
+                $websites->count(),
+            ),
+            null,
+            null,
+            $request->user()?->getKey(),
+        );
+
         return redirect()
             ->route('admin.websites.index')
             ->with('status', trans_choice(
@@ -235,6 +325,18 @@ final class WebsiteController extends Controller
         if ($changed) {
             // `is_active` gates publication (StatusProjector::publishedQuery).
             $this->statusPageCache->invalidate();
+
+            $this->adminNotifications->recordMonitoringConfigChanged(
+                $active ? 'bulk_enabled' : 'bulk_disabled',
+                trans_choice(
+                    '{1} A website was :state.|[2,*] :count websites were :state.',
+                    $websites->count(),
+                    ['state' => $active ? 'enabled for monitoring' : 'disabled for monitoring'],
+                ),
+                null,
+                null,
+                $request->user()?->getKey(),
+            );
         }
 
         return redirect()

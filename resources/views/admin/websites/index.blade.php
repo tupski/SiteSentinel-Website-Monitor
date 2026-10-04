@@ -9,7 +9,7 @@
     </div>
 
     @if (session('status'))
-        <x-ui.alert variant="success" class="mb-4">
+        <x-ui.alert variant="success" class="mb-4" :dismissible="true">
             {{ session('status') }}
         </x-ui.alert>
     @endif
@@ -19,6 +19,28 @@
             {{ $message }}
         </x-ui.alert>
     @enderror
+
+    {{-- Requirement 31: reflect the active availability filter and offer a
+         one-click way to remove it. The filter is a whitelisted query parameter
+         (`status`), so the filtered list is bookmarkable/refreshable and the
+         count matches the dashboard "Operational" card. --}}
+    @php($statusLabels = [
+        'UP' => __('Operational'),
+        'DOWN' => __('Down'),
+        'unknown' => __('Unknown'),
+    ])
+    @if (($statusFilter ?? null) !== null)
+        <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-muted px-4 py-3">
+            <span class="text-sm text-text-muted">{{ __('Showing:') }}</span>
+            <x-ui.badge :variant="$statusFilter === 'UP' ? 'success' : ($statusFilter === 'DOWN' ? 'danger' : 'neutral')">
+                {{ $statusLabels[$statusFilter] ?? $statusFilter }}
+            </x-ui.badge>
+            <a href="{{ route('admin.websites.index') }}"
+               class="text-sm text-text-muted underline hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                {{ __('Clear filter') }}
+            </a>
+        </div>
+    @endif
 
     {{-- Bulk selection + action bar (ADR-034). Alpine owns only this local UI
          state; every action still posts through a CSRF-protected form. --}}
@@ -89,6 +111,7 @@
                     </th>
                     <th class="px-4 py-3 text-left font-medium">{{ __('Name') }}</th>
                     <th class="px-4 py-3 text-left font-medium">{{ __('URL') }}</th>
+                    <th class="px-4 py-3 text-left font-medium">{{ __('Status page') }}</th>
                     <th class="px-4 py-3 text-left font-medium">{{ __('Availability') }}</th>
                     <th class="px-4 py-3 text-left font-medium">{{ __('Security') }}</th>
                     <th class="px-4 py-3 text-left font-medium">{{ __('Last check') }}</th>
@@ -106,7 +129,48 @@
                             />
                         </td>
                         <td class="px-4 py-3 font-medium text-text">{{ $website->name }}</td>
-                        <td class="px-4 py-3 text-text-muted">{{ $website->url }}</td>
+                        @php($safeUrl = $website->safeUrl())
+                        <td class="px-4 py-3 text-text-muted">
+                            @if ($safeUrl !== null)
+                                {{-- B2: real anchor; scheme checked via Website::safeUrl() so a
+                                     stored value can never inject a non-http(s) href. Long URLs
+                                     truncate inside the cell (no page-level overflow) and the
+                                     full URL is still available via `title`. --}}
+                                <a href="{{ $safeUrl }}"
+                                   target="_blank"
+                                   rel="noopener noreferrer"
+                                   title="{{ $safeUrl }}"
+                                   class="block max-w-[16rem] truncate text-info underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">
+                                    {{ $safeUrl }}
+                                </a>
+                            @else
+                                <span class="block max-w-[16rem] truncate" title="{{ $website->url }}">{{ $website->url }}</span>
+                            @endif
+                        </td>
+                        @php($page = $website->statusPage)
+                        <td class="px-4 py-3">
+                            @if ($page === null)
+                                <x-ui.badge variant="neutral">{{ __('Not linked') }}</x-ui.badge>
+                            @elseif ($page->isPublic())
+                                {{-- B3: only a publicly-reachable page is linkable; Private /
+                                     Password Protected pages render as a non-link badge so the
+                                     admin never gets a dead/404 destination. Route is resolved
+                                     from the real status page route (status.show), never built
+                                     from a raw value. --}}
+                                <a href="{{ route('status.show', $page) }}"
+                                   target="_blank"
+                                   rel="noopener noreferrer"
+                                   title="{{ __('Open :name status page', ['name' => $page->name]) }}"
+                                   class="inline-flex rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">
+                                    <x-ui.badge variant="info">{{ $page->slug }}</x-ui.badge>
+                                </a>
+                            @else
+                                <x-ui.badge variant="neutral"
+                                            :title="$page->isPasswordProtected() ? __('Password protected') : __('Private')">
+                                    {{ $page->slug }}
+                                </x-ui.badge>
+                            @endif
+                        </td>
                         <td class="px-4 py-3">{{ $website->status_availability ?? '—' }}</td>
                         <td class="px-4 py-3">{{ $website->status_security ?? '—' }}</td>
                         <td class="px-4 py-3 text-text-muted">{{ $website->last_checked_at?->diffForHumans() ?? '—' }}</td>
@@ -134,12 +198,16 @@
 
                                 <form method="POST" action="{{ route('admin.websites.toggle', $website) }}" class="inline-block">
                                     @csrf
+                                    {{-- B1: the toggle shows the ACTION to take, not the current
+                                         state. Enabled rows offer "Disable monitoring" (pause-circle,
+                                         danger tint); disabled rows offer "Enable monitoring"
+                                         (play-circle, success tint). Distinct glyphs + semantic
+                                         tokens, so the difference is obvious in both themes. --}}
                                     <x-ui.button type="submit" variant="ghost" icon-only size="sm"
-                                            :aria-label="$website->is_active ? __('Disable :name', ['name' => $website->name]) : __('Enable :name', ['name' => $website->name])"
-                                            :title="$website->is_active ? __('Disable') : __('Enable')">
-                                        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
-                                        </svg>
+                                            :class="$website->is_active ? '!text-danger hover:!bg-danger-muted hover:!text-danger' : '!text-success hover:!bg-success-muted hover:!text-success'"
+                                            :aria-label="$website->is_active ? __('Disable monitoring for :name', ['name' => $website->name]) : __('Enable monitoring for :name', ['name' => $website->name])"
+                                            :title="$website->is_active ? __('Disable monitoring') : __('Enable monitoring')">
+                                        <x-ui.icon :name="$website->is_active ? 'pause-circle' : 'play-circle'" />
                                     </x-ui.button>
                                 </form>
 
@@ -180,7 +248,7 @@
                         </td>
                     </tr>
                 @empty
-                    <x-ui.table-empty :columns="7" :title="__('No websites monitored yet.')" />
+                    <x-ui.table-empty :columns="8" :title="__('No websites monitored yet.')" />
                 @endforelse
             </x-ui.table-body>
         </x-ui.table>

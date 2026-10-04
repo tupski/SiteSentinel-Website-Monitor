@@ -158,6 +158,52 @@ final class UiPrimitivesTest extends TestCase
         $html->assertSee('Something went wrong.');
     }
 
+    /**
+     * Requirement 22 — backward compatibility. An alert is dismissible only
+     * when explicitly opted in, so every existing (persistent) usage must
+     * render exactly as before: no close button, no Alpine hooks, no `x-cloak`.
+     */
+    public function test_alert_is_persistent_by_default(): void
+    {
+        $html = $this->blade('<x-ui.alert variant="danger">Something went wrong.</x-ui.alert>');
+
+        $html->assertDontSee('Dismiss notification', false);
+        $html->assertDontSee('x-data="flashMessage"', false);
+        $html->assertDontSee('x-cloak', false);
+        $this->assertStringNotContainsString('<button', (string) $html);
+    }
+
+    public function test_dismissible_alert_renders_accessible_close_button(): void
+    {
+        $html = $this->blade('<x-ui.alert variant="success" :dismissible="true">Saved.</x-ui.alert>');
+
+        // Alpine wiring — the component is registered in app.js, never inline.
+        $html->assertSee('x-data="flashMessage"', false);
+        $html->assertSee('x-show="visible"', false);
+        $html->assertSee('x-cloak', false);
+
+        // Real, keyboard-reachable button with an accessible name.
+        $html->assertSee('<button', false);
+        $html->assertSee('type="button"', false);
+        $html->assertSee('aria-label="Dismiss notification"', false);
+
+        // Dismissal is a local click handler that must not bubble to a parent.
+        $html->assertSee('x-on:click.stop="dismiss()"', false);
+
+        // Semantic hover/focus tokens (correct in both themes, no `dark:`).
+        $html->assertSee('hover:bg-surface-hover', false);
+        $html->assertSee('focus-visible:ring-focus', false);
+    }
+
+    public function test_dismissible_alert_accepts_a_custom_close_label(): void
+    {
+        $html = $this->blade(
+            '<x-ui.alert variant="success" :dismissible="true" dismiss-label="Close message">Saved.</x-ui.alert>'
+        );
+
+        $html->assertSee('aria-label="Close message"', false);
+    }
+
     public function test_empty_state_renders_icon_title_description_and_action(): void
     {
         $html = $this->blade(

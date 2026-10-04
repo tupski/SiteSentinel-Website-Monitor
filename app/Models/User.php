@@ -9,6 +9,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -52,5 +53,22 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
+    }
+
+    /**
+     * In-app notification centre rows for this admin (DATABASE.md §3.24, ADR-038).
+     */
+    public function adminNotifications(): HasMany
+    {
+        return $this->hasMany(AdminNotification::class);
+    }
+
+    /**
+     * Unread in-app notification count for this admin (`read_at IS NULL`),
+     * served by `idx_admin_notifications_user_read_created` (ADR-038).
+     */
+    public function unreadAdminNotificationsCount(): int
+    {
+        return $this->adminNotifications()->whereNull('read_at')->count();
     }
 }

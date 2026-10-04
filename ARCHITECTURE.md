@@ -613,8 +613,36 @@ correct in both themes (ADR-033).
   (Alpine-based; delete confirm, help, bulk actions), and the `x-per-page` selector (10 / 20 / 50 / 100
   / All, preserving the query string, backed by a shared controller-side validated per-page whitelist
   helper).
+- **Icons** — `x-ui.icon` (name → inline SVG, `stroke="currentColor"` + `aria-hidden="true"` so
+  colour/contrast is inherited from the surrounding semantic text colour and works in both themes;
+  ADR-037). Icons are the shared primitive for later phases; existing views are migrated to it in
+  those phases, not here.
 - Icon-button convention for row actions with accessible `aria-label`; **delete is always gated by a
   confirmation modal**.
+
+### 14.4 Phase A foundations — analytics, in-app notifications, status-page refresh (ADR-037–040)
+
+> **Foundations (Phase A).** These are the architectural additions recorded in
+> [`DECISIONS.md`](DECISIONS.md) `ADR-037`–`ADR-040`; the owning phase is [`PLAN.md`](PLAN.md) Phase A.
+
+- **Analytics / charts (ADR-037)** — visualisations are **server-rendered inline SVG from Blade**,
+  driven by data read on the web/UI plane. **No JS chart library** and no new dependency; the only
+  interactivity is Alpine local display state. Charts render from **persisted rows only** — **no
+  fabricated/historical data**; an empty dataset renders an explicit empty state.
+- **In-app admin notification centre (ADR-038)** — `admin_notifications` ([`DATABASE.md`](DATABASE.md)
+  §3.24) persisted **per admin**, generated from the existing incident/security/config events already
+  written to `audit_logs`. It is **decoupled from outbound delivery**: not a provider, not on the
+  `notifications` queue, no `notification_logs` coupling. Deduped via `uq_admin_notifications_dedupe_key`;
+  read/unread via `read_at`; ownership scoped to the authenticated admin; `link_url` is an internal
+  relative path only. See [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15.
+- **Public status-page auto-refresh (ADR-039)** — **client-side periodic refresh** of the existing
+  status route/DTO. Intervals **1 / 5 / 10 / 30 / 60 minutes**, countdown, **non-overlapping**
+  requests, **paused while hidden**. No real-time infrastructure, no new route, no outbound probe;
+  progressive enhancement only (the page is complete with JS disabled).
+- **Precise last-update timestamp (ADR-040)** — the public status DTO gains an **allowlisted UTC
+  ISO-8601** timestamp (projection generation stamp only, not an incident/check time), rendered in the
+  visitor's **local timezone** as `Last update: H:i dd/mm/yyyy`. It passes the same redaction
+  chokepoint (§10, [`STATUS-PAGE.md`](STATUS-PAGE.md) §4, §8.2).
 
 ---
 

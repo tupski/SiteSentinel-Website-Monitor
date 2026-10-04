@@ -11,7 +11,7 @@
         </p>
 
         @if(session('status'))
-            <x-ui.alert variant="success" class="mt-4">{{ e(session('status')) }}</x-ui.alert>
+            <x-ui.alert variant="success" class="mt-4" :dismissible="true">{{ e(session('status')) }}</x-ui.alert>
         @endif
 
         @if ($errors->any())

@@ -3,24 +3,69 @@
 
     <h1 class="text-2xl font-bold tracking-tight text-text">{{ __('Dashboard') }}</h1>
 
-    {{-- AC-6-07: counters total / operational / warning / incident. --}}
+    {{-- AC-6-07: counters total / operational / warning / incident.
+         Requirement 31: each counter is a real anchor (keyboard-focusable, opens
+         in the same tab) that deep-links to the matching filtered list, so the
+         number on the card is always reconcilable with the destination page.
+         Counts are guarded (`?? 0`) so a partially-available payload never
+         breaks the shell (graceful degradation). --}}
     <div class="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div class="rounded-lg border border-border bg-surface-elevated p-4 shadow-sm">
-            <div class="text-sm text-text-muted">{{ __('Total websites') }}</div>
-            <div class="mt-1 text-2xl font-bold text-text">{{ $counters['total'] }}</div>
-        </div>
-        <div class="rounded-lg border border-success/30 bg-success-muted p-4 shadow-sm">
-            <div class="text-sm text-success">{{ __('Operational') }}</div>
-            <div class="mt-1 text-2xl font-bold text-success">{{ $counters['operational'] }}</div>
-        </div>
-        <div class="rounded-lg border border-warning/30 bg-warning-muted p-4 shadow-sm">
-            <div class="text-sm text-warning">{{ __('Warning incidents') }}</div>
-            <div class="mt-1 text-2xl font-bold text-warning">{{ $counters['warning'] }}</div>
-        </div>
-        <div class="rounded-lg border border-danger/30 bg-danger-muted p-4 shadow-sm">
-            <div class="text-sm text-danger">{{ __('Critical incidents') }}</div>
-            <div class="mt-1 text-2xl font-bold text-danger">{{ $counters['incident'] }}</div>
-        </div>
+        <a href="{{ route('admin.websites.index') }}"
+           data-dashboard-card="total"
+           aria-label="{{ __('Total websites — view all websites') }}"
+           class="group block rounded-lg border border-border bg-surface-elevated p-4 shadow-sm transition-colors hover:border-focus hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
+            <div class="flex items-start justify-between gap-2">
+                <div>
+                    <div class="text-sm text-text-muted">{{ __('Total websites') }}</div>
+                    <div class="mt-1 text-2xl font-bold text-text">{{ $counters['total'] ?? 0 }}</div>
+                </div>
+                <svg class="mt-0.5 h-4 w-4 shrink-0 text-text-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+            </div>
+        </a>
+        <a href="{{ route('admin.websites.index', ['status' => 'UP']) }}"
+           data-dashboard-card="operational"
+           aria-label="{{ __('Operational websites — view the operational list') }}"
+           class="group block rounded-lg border border-success/30 bg-success-muted p-4 shadow-sm transition-colors hover:border-success hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
+            <div class="flex items-start justify-between gap-2">
+                <div>
+                    <div class="text-sm text-success">{{ __('Operational') }}</div>
+                    <div class="mt-1 text-2xl font-bold text-success">{{ $counters['operational'] ?? 0 }}</div>
+                </div>
+                <svg class="mt-0.5 h-4 w-4 shrink-0 text-success transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+            </div>
+        </a>
+        <a href="{{ route('admin.incidents.index', ['severity' => 'WARNING', 'open' => 1]) }}"
+           data-dashboard-card="warning"
+           aria-label="{{ __('Warning incidents — view open warning incidents') }}"
+           class="group block rounded-lg border border-warning/30 bg-warning-muted p-4 shadow-sm transition-colors hover:border-warning hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
+            <div class="flex items-start justify-between gap-2">
+                <div>
+                    <div class="text-sm text-warning">{{ __('Warning incidents') }}</div>
+                    <div class="mt-1 text-2xl font-bold text-warning">{{ $counters['warning'] ?? 0 }}</div>
+                </div>
+                <svg class="mt-0.5 h-4 w-4 shrink-0 text-warning transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+            </div>
+        </a>
+        <a href="{{ route('admin.incidents.index', ['severity' => 'CRITICAL', 'open' => 1]) }}"
+           data-dashboard-card="critical"
+           aria-label="{{ __('Critical incidents — view open critical incidents') }}"
+           class="group block rounded-lg border border-danger/30 bg-danger-muted p-4 shadow-sm transition-colors hover:border-danger hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
+            <div class="flex items-start justify-between gap-2">
+                <div>
+                    <div class="text-sm text-danger">{{ __('Critical incidents') }}</div>
+                    <div class="mt-1 text-2xl font-bold text-danger">{{ $counters['incident'] ?? 0 }}</div>
+                </div>
+                <svg class="mt-0.5 h-4 w-4 shrink-0 text-danger transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+            </div>
+        </a>
     </div>
 
     {{-- AC-21: monitoring-pipeline health/readiness (database, Redis, queue worker).

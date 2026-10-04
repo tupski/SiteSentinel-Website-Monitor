@@ -165,6 +165,11 @@ final class AdminDarkModeMigrationTest extends TestCase
         // Flash messages adopt the shared alert primitive (semantic variant bg).
         $this->assertStringContainsString('bg-success-muted', $html);
         $this->assertStringContainsString('Saved successfully.', $html);
+
+        // Requirement 22 — success flashes are dismissible on the page.
+        $this->assertStringContainsString('x-data="flashMessage"', $html);
+        $this->assertStringContainsString('aria-label="Dismiss notification"', $html);
+        $this->assertStringContainsString('x-on:click.stop="dismiss()"', $html);
     }
 
     // -----------------------------------------------------------------------

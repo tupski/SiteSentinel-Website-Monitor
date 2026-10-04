@@ -6,13 +6,31 @@
     </div>
 
     @if (session('status'))
-        <x-ui.alert variant="success" class="mb-4">
+        <x-ui.alert variant="success" class="mb-4" :dismissible="true">
             {{ session('status') }}
         </x-ui.alert>
     @endif
 
+    {{-- Requirement 31: the dashboard "Warning" / "Critical" cards deep-link here
+         with `open=1` so the list matches the open-only counter. Surface that
+         scope explicitly and give a clear way back to the full (all-state) list. --}}
+    @if ($openOnly ?? false)
+        <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-muted px-4 py-3">
+            <span class="text-sm text-text-muted">{{ __('Showing:') }}</span>
+            <x-ui.badge variant="info">{{ __('Open incidents') }}</x-ui.badge>
+            <a href="{{ route('admin.incidents.index', request()->except(['open', 'page'])) }}"
+               class="text-sm text-text-muted underline hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                {{ __('Clear filter') }}
+            </a>
+        </div>
+    @endif
+
     {{-- FR-62: filterable by state, severity, type, and website. --}}
     <form method="GET" action="{{ route('admin.incidents.index') }}" class="mb-4 flex flex-wrap items-end gap-3">
+        @if ($openOnly ?? false)
+            {{-- Preserve the open-only scope while refining by the other filters. --}}
+            <input type="hidden" name="open" value="1">
+        @endif
         <label class="text-sm">
             <span class="block text-text-muted">{{ __('Status') }}</span>
             <x-ui.select name="status" class="mt-1 !w-auto">

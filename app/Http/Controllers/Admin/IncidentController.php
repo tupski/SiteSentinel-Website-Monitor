@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Incident;
 use App\Services\Audit\AuditLogger;
 use App\Services\Incidents\IncidentStateMachine;
+use App\Services\Notifications\AdminNotificationService;
 use App\Services\Notifications\NotificationDispatcher;
 use App\Services\Notifications\NotificationIntents;
 use App\Support\PerPage;
@@ -27,14 +28,26 @@ final class IncidentController extends Controller
     public function __construct(
         private readonly IncidentStateMachine $stateMachine,
         private readonly AuditLogger $audit,
+        private readonly AdminNotificationService $adminNotifications,
     ) {}
 
     public function index(Request $request): View
     {
+        // Requirement 31: `open=1` restricts to the incident states that the
+        // dashboard counters count (DETECTED/ACKNOWLEDGED), so the "Warning" /
+        // "Critical" card deep-links land on a list whose total equals the card.
+        // The `status` filter (when present and valid) takes precedence, since a
+        // resolved severity bucket is a deliberate operator choice.
+        $openOnly = $request->query('open') === '1';
+        $hasValidStatus = $request->filled('status') && $this->isValidStatus((string) $request->query('status'));
+
         $query = Incident::query()
             ->with(['website', 'acknowledgedBy', 'resolvedBy'])
-            ->when($request->filled('status') && $this->isValidStatus((string) $request->query('status')), function ($query) use ($request): void {
+            ->when($hasValidStatus, function ($query) use ($request): void {
                 $query->where('status', (string) $request->query('status'));
+            })
+            ->when($openOnly && ! $hasValidStatus, function ($query): void {
+                $query->whereIn('status', [IncidentStateMachine::DETECTED, IncidentStateMachine::ACKNOWLEDGED]);
             })
             ->when($request->filled('severity') && $this->isValidSeverity((string) $request->query('severity')), function ($query) use ($request): void {
                 $query->where('severity', (string) $request->query('severity'));
@@ -56,6 +69,7 @@ final class IncidentController extends Controller
             'statuses' => [IncidentStateMachine::DETECTED, IncidentStateMachine::ACKNOWLEDGED, IncidentStateMachine::RESOLVED],
             'severities' => ['INFO', 'WARNING', 'CRITICAL'],
             'types' => ['availability', 'security'],
+            'openOnly' => $openOnly,
         ]);
     }
 
@@ -101,6 +115,14 @@ final class IncidentController extends Controller
 
         try {
             NotificationIntents::enqueue($resolved->id, NotificationDispatcher::EVENT_RESOLVED, $request->user()?->getKey());
+        } catch (Throwable $e) {
+            report($e);
+        }
+
+        // In-app notification is additive and independent of outbound delivery
+        // (ADR-038). Best-effort: never block the resolve response.
+        try {
+            $this->adminNotifications->recordIncidentTransition($resolved, 'resolved');
         } catch (Throwable $e) {
             report($e);
         }

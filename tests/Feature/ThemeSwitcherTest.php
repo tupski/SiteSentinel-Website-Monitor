@@ -75,12 +75,29 @@ final class ThemeSwitcherTest extends TestCase
     {
         $html = $this->adminHtml();
 
-        // Remove the opened dropdown panel, then assert none of the theme words
-        // survive anywhere else on the page as visible text.
-        $panelStart = strpos($html, 'role="menu"');
-        $this->assertNotFalse($panelStart, 'theme dropdown panel must render');
-        $panelEnd = strpos($html, '</div>', $panelStart);
-        $outside = substr($html, 0, $panelStart).substr($html, $panelEnd);
+        // Scope the check to the admin top bar — the region that holds the
+        // theme trigger — and remove the ENTIRE theme-switcher component
+        // (trigger + its opened menu) before stripping tags. A leaked theme
+        // name would be visible in this chrome.
+        //
+        // This replaces a whole-page byte-slice that relied on `strip_tags`
+        // swallowing the dashboard's legitimate "System health" card; any
+        // added sibling header control (e.g. the Requirement 28 notification
+        // bell) perturbs that swallow boundary and re-exposes "System", which
+        // is not a theme-word leak. The trigger-only and menu-option
+        // assertions above/below still cover the collapsed control.
+        $headerStart = strpos($html, '<header');
+        $this->assertNotFalse($headerStart, 'the admin header must render');
+        $headerEnd = strpos($html, '</header>', $headerStart);
+        $this->assertNotFalse($headerEnd, 'the admin header must close');
+        $header = substr($html, $headerStart, $headerEnd - $headerStart + strlen('</header>'));
+
+        $switcherStart = strpos($header, 'x-data="themeMenu"');
+        $this->assertNotFalse($switcherStart, 'the theme switcher must render');
+        $switcherEnd = strpos($header, 'data-profile-trigger', $switcherStart);
+        $this->assertNotFalse($switcherEnd, 'the profile trigger must follow the theme switcher');
+
+        $outside = substr($header, 0, $switcherStart).substr($header, $switcherEnd);
         $text = $this->visibleText($outside);
 
         foreach (['Light', 'Dark', 'System', 'Theme', 'Appearance'] as $word) {

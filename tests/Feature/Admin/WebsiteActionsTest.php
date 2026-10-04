@@ -6,9 +6,11 @@ namespace Tests\Feature\Admin;
 
 use App\Jobs\RunWebsiteCheck;
 use App\Models\Incident;
+use App\Models\StatusPage;
 use App\Models\User;
 use App\Models\Website;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -110,13 +112,153 @@ final class WebsiteActionsTest extends TestCase
         // Accessible labels for every row action (ADR-034 / FR-107).
         $this->assertStringContainsString('aria-label="Run check for Guarded"', $html);
         $this->assertStringContainsString('aria-label="Edit Guarded"', $html);
-        $this->assertStringContainsString('aria-label="Disable Guarded"', $html);
+        $this->assertStringContainsString('aria-label="Disable monitoring for Guarded"', $html);
         $this->assertStringContainsString('aria-label="Delete Guarded"', $html);
 
         // Icons, not text labels, carry the action.
         $this->assertStringContainsString('<svg', $html);
         $this->assertStringNotContainsString('>Edit</a>', $html);
         $this->assertStringNotContainsString('>Disable</button>', $html);
+    }
+
+    // ---------------------------------------------------------------------
+    // 2b. B1 — enable/disable monitoring clarity
+    // ---------------------------------------------------------------------
+
+    public function test_toggle_action_shows_distinct_icons_tints_and_labels_per_state(): void
+    {
+        Website::factory()->create(['name' => 'Running', 'is_active' => true]);
+        Website::factory()->create(['name' => 'Stopped', 'is_active' => false]);
+
+        $html = (string) $this->actingAs($this->admin)
+            ->get(route('admin.websites.index'))
+            ->assertOk()
+            ->getContent();
+
+        // The toggle offers the ACTION to take, per state.
+        $this->assertStringContainsString('aria-label="Disable monitoring for Running"', $html);
+        $this->assertStringContainsString('aria-label="Enable monitoring for Stopped"', $html);
+        $this->assertStringContainsString('title="Disable monitoring"', $html);
+        $this->assertStringContainsString('title="Enable monitoring"', $html);
+
+        // Distinct glyphs: pause-circle (disable) vs play-circle (enable).
+        $this->assertStringContainsString('M14.25 9v6', $html, 'pause-circle path expected for an active row');
+        $this->assertStringContainsString('M15.91 11.672', $html, 'play-circle path expected for an inactive row');
+
+        // Distinct semantic tints (danger for disable, success for enable).
+        $this->assertStringContainsString('!text-danger', $html);
+        $this->assertStringContainsString('!text-success', $html);
+    }
+
+    // ---------------------------------------------------------------------
+    // 2c. B2 — URL column is a safe, new-tab hyperlink
+    // ---------------------------------------------------------------------
+
+    public function test_url_column_renders_a_safe_new_tab_anchor(): void
+    {
+        Website::factory()->create([
+            'name' => 'Linkable',
+            'url' => 'https://example.com/some/very/long/path?ref=admin',
+            'scheme' => 'https',
+            'host' => 'example.com',
+        ]);
+
+        $html = (string) $this->actingAs($this->admin)
+            ->get(route('admin.websites.index'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('href="https://example.com/some/very/long/path?ref=admin"', $html);
+        $this->assertStringContainsString('target="_blank"', $html);
+        $this->assertStringContainsString('rel="noopener noreferrer"', $html);
+        // The full URL stays recoverable via `title` even when visually truncated.
+        $this->assertStringContainsString('title="https://example.com/some/very/long/path?ref=admin"', $html);
+    }
+
+    // ---------------------------------------------------------------------
+    // 2d. B3 — status-page association column
+    // ---------------------------------------------------------------------
+
+    public function test_status_page_column_shows_not_linked_when_unassigned(): void
+    {
+        Website::factory()->create(['name' => 'Orphan']);
+
+        $html = (string) $this->actingAs($this->admin)
+            ->get(route('admin.websites.index'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('Not linked', $html);
+    }
+
+    public function test_status_page_column_links_a_public_page_by_its_real_route(): void
+    {
+        $page = StatusPage::create([
+            'name' => 'Public page',
+            'slug' => 'public-page',
+            'is_default' => false,
+            'visibility_mode' => StatusPage::MODE_PUBLIC,
+        ]);
+
+        Website::factory()->create(['name' => 'Published', 'status_page_id' => $page->id]);
+
+        $html = (string) $this->actingAs($this->admin)
+            ->get(route('admin.websites.index'))
+            ->assertOk()
+            ->getContent();
+
+        // Resolved through the real status page route, not a hand-built string.
+        $this->assertStringContainsString('href="'.route('status.show', $page).'"', $html);
+        $this->assertMatchesRegularExpression('/>\s*'.preg_quote($page->slug, '/').'\s*</', $html);
+        $this->assertStringContainsString('target="_blank"', $html);
+        $this->assertStringContainsString('rel="noopener noreferrer"', $html);
+    }
+
+    public function test_status_page_column_does_not_link_a_non_public_page(): void
+    {
+        $page = StatusPage::create([
+            'name' => 'Private page',
+            'slug' => 'private-page',
+            'is_default' => false,
+            'visibility_mode' => StatusPage::MODE_PRIVATE,
+        ]);
+
+        Website::factory()->create(['name' => 'Hidden', 'status_page_id' => $page->id]);
+
+        $html = (string) $this->actingAs($this->admin)
+            ->get(route('admin.websites.index'))
+            ->assertOk()
+            ->getContent();
+
+        // The slug is shown, but a Private page is never linkable (no 404 destination).
+        $this->assertStringContainsString($page->slug, $html);
+        $this->assertStringNotContainsString('href="'.route('status.show', $page).'"', $html);
+    }
+
+    public function test_status_page_column_is_eager_loaded_without_an_n_plus_one(): void
+    {
+        $page = StatusPage::create([
+            'name' => 'Shared page',
+            'slug' => 'shared-page',
+            'is_default' => false,
+            'visibility_mode' => StatusPage::MODE_PUBLIC,
+        ]);
+
+        foreach (range(1, 5) as $i) {
+            Website::factory()->create(['name' => "Site {$i}", 'status_page_id' => $page->id]);
+        }
+
+        DB::enableQueryLog();
+
+        $this->actingAs($this->admin)->get(route('admin.websites.index'))->assertOk();
+
+        $statusPageQueries = collect(DB::getQueryLog())
+            ->filter(fn (array $query): bool => str_contains($query['query'], 'from "status_pages"'))
+            ->count();
+
+        DB::disableQueryLog();
+
+        $this->assertSame(1, $statusPageQueries, 'the assigned status page must be eager-loaded exactly once');
     }
 
     public function test_delete_action_is_gated_by_a_confirmation_modal(): void

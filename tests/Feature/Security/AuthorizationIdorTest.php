@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Security;
 
+use App\Models\AdminNotification;
 use App\Models\Incident;
 use App\Models\NotificationChannel;
 use App\Models\StatusPage;
@@ -37,6 +38,7 @@ final class AuthorizationIdorTest extends SecurityTestCase
             'enabled' => true,
             'config' => ['recipients' => ['a@example.test']],
         ]);
+        $notification = AdminNotification::factory()->create();
 
         $this->get(route('admin.dashboard'))->assertRedirect(route('login'));
         $this->get(route('admin.websites.index'))->assertRedirect(route('login'));
@@ -53,6 +55,11 @@ final class AuthorizationIdorTest extends SecurityTestCase
         $this->put(route('admin.status-settings.update'), [])->assertRedirect(route('login'));
         $this->get(route('admin.status-pages.index'))->assertRedirect(route('login'));
         $this->post(route('admin.status-pages.store'), [])->assertRedirect(route('login'));
+        $this->get(route('admin.notifications.in-app.index'))->assertRedirect(route('login'));
+        $this->get(route('admin.notifications.in-app.unread-count'))->assertRedirect(route('login'));
+        $this->get(route('admin.notifications.in-app.page'))->assertRedirect(route('login'));
+        $this->post(route('admin.notifications.read', $notification))->assertRedirect(route('login'));
+        $this->post(route('admin.notifications.read-all'))->assertRedirect(route('login'));
     }
 
     public function test_every_admin_route_rejects_non_admin_users(): void
@@ -75,6 +82,13 @@ final class AuthorizationIdorTest extends SecurityTestCase
         $this->actingAs($viewer)->post(route('admin.incidents.resolve', $incident))->assertForbidden();
         $this->actingAs($viewer)->put(route('admin.status-settings.update'), [])->assertForbidden();
         $this->actingAs($viewer)->get(route('admin.status-pages.index'))->assertForbidden();
+
+        $notification = AdminNotification::factory()->create();
+        $this->actingAs($viewer)->get(route('admin.notifications.in-app.index'))->assertForbidden();
+        $this->actingAs($viewer)->get(route('admin.notifications.in-app.unread-count'))->assertForbidden();
+        $this->actingAs($viewer)->get(route('admin.notifications.in-app.page'))->assertForbidden();
+        $this->actingAs($viewer)->post(route('admin.notifications.read', $notification))->assertForbidden();
+        $this->actingAs($viewer)->post(route('admin.notifications.read-all'))->assertForbidden();
     }
 
     public function test_disabled_account_is_rejected_and_session_invalidated(): void

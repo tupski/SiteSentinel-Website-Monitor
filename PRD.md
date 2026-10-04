@@ -430,6 +430,10 @@ Detail (layout, caching, theming) lives in `STATUS-PAGE.md`.
 | **FR-107** | `Future` | Destructive row actions (at minimum delete) MUST be gated by a confirmation modal, and icon-only row actions MUST carry an accessible label. |
 | **FR-108** | `Future` | Admin MUST be able to manage **multiple status pages** — create, edit, and delete named pages with a unique `slug`, mark one as default, and assign a website to a page. |
 | **FR-109** | `Future` | Form fields MAY expose contextual help; where help is shown it MUST be reachable both on hover (tooltip) and on click (modal). |
+| **FR-110** | `Future` | The admin area MUST present analytics visualisations rendered as server-side inline SVG (no client-side charting library), from persisted data only — no fabricated or historical data is ever displayed. |
+| **FR-111** | `Future` | The admin area MUST provide an **in-app notification centre** persisted per admin, generated from existing incident/security/config events, with read/unread state, deduplication, and ownership scoped to the authenticated admin. It MUST be independent from outbound channel delivery. |
+| **FR-112** | `Future` | The public status page MUST support a client-side auto-refresh of the existing status projection at selectable intervals (1 / 5 / 10 / 30 / 60 minutes) with a countdown, non-overlapping requests, and visibility-based pausing, without new real-time infrastructure. |
+| **FR-113** | `Future` | The public status projection MUST expose a precise last-update timestamp as an allowlisted UTC ISO-8601 field, rendered in the visitor's local timezone. |
 
 ---
 
@@ -1135,6 +1139,9 @@ external metrics export.
 | Two-factor authentication (`FR-08`) | **Phase 3** | |
 | Per-Admin notification preferences and quiet hours (`FR-76`) | **Phase 3** | |
 | Time-series metrics export (`FR-102`) | **Phase 3** | |
+| Analytics visualisations as server-rendered inline SVG (`FR-110`) | **Phase 3** | No JS chart library; persisted data only ([`DECISIONS.md`](DECISIONS.md) `ADR-037`). |
+| In-app admin notification centre (`FR-111`) | **Phase 3** | `admin_notifications` ([`DATABASE.md`](DATABASE.md) §3.24); decoupled from outbound delivery ([`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15). |
+| Status-page auto-refresh + precise last-update timestamp (`FR-112`, `FR-113`) | **Phase 3** | Client-side refresh of the existing route/DTO; allowlisted UTC ISO-8601 stamp ([`STATUS-PAGE.md`](STATUS-PAGE.md) §8.2). |
 
 ---
 

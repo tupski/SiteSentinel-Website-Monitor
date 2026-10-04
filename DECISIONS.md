@@ -1101,6 +1101,186 @@ shared `x-admin-sidebar` component, which they do).
 
 ---
 
+## ADR-037: Charts / analytics visualisation = server-rendered inline SVG (no JS chart library)
+
+**Status** — Accepted (foundations; owning phase [`PLAN.md`](PLAN.md) Phase A)
+
+**Context** — The admin area needs lightweight analytics visuals (per-website check volume,
+incident counts by severity, availability/security over time). The canonical stack forbids SPA
+frameworks and fixes the JS layer to Alpine.js "only where necessary" (ADR-002, [`AGENTS.md`](AGENTS.md)
+§6). Introducing a charting library would add a client-side dependency and a render path that is not
+server-authoritative, and the existing docs sanction **no** JS chart library.
+
+**Decision** — Charts and analytics visuals are rendered as **server-side inline SVG produced from
+Blade**, driven by data already read on the web/UI plane. No new JavaScript or Composer dependency is
+added; the only interactive behaviour is Alpine for local display state (e.g. a legend toggle), never
+for data fetching. Chart data comes **only** from persisted rows — **no fabricated, synthetic, or
+historical data is ever displayed**; a chart with no data renders an explicit empty state rather than
+a placeholder series.
+
+**Alternatives considered** — A client-side charting library such as Chart.js/ApexCharts (rejected:
+new dependency, SPA-adjacent render path, contradicts ADR-002 and the fixed stack); server-side
+rendering via an image/plotting extension (rejected: new PHP extension dependency, not portable);
+a third-party hosted chart embed (rejected: data egress and an external dependency, contradicts the
+self-hosted core concept).
+
+**Reason** — Inline SVG keeps the UI server-rendered and dependency-free, is theme-aware for free
+(it inherits `currentColor` and the semantic tokens, ADR-033), scales crisply, is accessible
+(role/label markup), and needs no build toolchain beyond the existing Vite pipeline. The data volume
+at MVP scale (≤100 sites) is trivial for server-side aggregation.
+
+**Consequences** — *Positive:* zero new dependencies, one rendering model (Blade), correct in both
+themes, and no fabricated data by construction. *Negative:* complex interactive charts (zoom,
+crosshair tooltips) are deliberately out of scope; each chart shape is hand-built SVG rather than a
+library primitive, so the set stays intentionally small.
+
+**Related** — [`ARCHITECTURE.md`](ARCHITECTURE.md) §14.4; ADR-002; ADR-033; ADR-034;
+[`AGENTS.md`](AGENTS.md) §6, §7.
+
+---
+
+## ADR-038: In-app admin notification centre (per-admin `admin_notifications`)
+
+**Status** — Accepted (foundations; owning phase [`PLAN.md`](PLAN.md) Phase A)
+
+**Context** — The Admin needs an in-app notification centre (a bell with unread count and a
+read/unread list) covering the same operational events that already drive outbound alerts. A
+parallel notification subsystem would duplicate delivery, dedupe, and retention logic. The existing
+notification infrastructure is the provider-independent dispatcher over `notification_logs`
+(ADR-010, ADR-011, [`NOTIFICATIONS.md`](NOTIFICATIONS.md)); admin actions and auth/incident events
+are already recorded to `audit_logs` ([`DATABASE.md`](DATABASE.md) §3.19).
+
+**Decision** — Extend the existing notification infrastructure rather than building a parallel
+system:
+
+- A new **`admin_notifications`** table persisted **per admin** (`user_id` FK `users`,
+  ON DELETE CASCADE) — see [`DATABASE.md`](DATABASE.md) §3.24.
+- It is **decoupled from outbound channel delivery**: it is *not* a provider, does *not* run on the
+  `notifications` queue, and does *not* participate in `notification_logs` suppression/cooldown. It
+  is a persisted, admin-scoped record of events.
+- **Generation is triggered from the existing incident/security/config events** that are already
+  written to `audit_logs` (`incident.created`/`.escalated`/`.resolved`, config changes, channel
+  changes) — the in-app centre reuses that event catalogue rather than inventing a second one.
+- **Deduplication** uses a nullable `dedupe_key` with a **UNIQUE index**, so a retried or repeated
+  generation path is idempotent (the Phase G caller uses a `firstOrCreate`-style path).
+- **Read/unread state** is `read_at` (nullable timestamp); `unread()` is the hot query, served by a
+  composite `(user_id, read_at, created_at)` index.
+- **Ownership scoping** is strict: every row belongs to exactly one `user_id`; the UI only ever
+  queries the authenticated admin's rows.
+- `link_url` is an **internal relative path only** (validated as relative) — never an absolute
+  external URL — so the centre cannot become an open-redirect surface.
+
+**Alternatives considered** — Reusing `notification_logs` as the in-app source (rejected: it is a
+delivery-attempt log, not a per-admin read-state store, and has no read/unread concept); a
+transient session/Redis-only centre (rejected: read state must survive restarts and be durable);
+adding an in-app "provider" to the dispatcher (rejected: the dispatcher fans out to transports, and
+an in-app record is not a transport — it would couple the provider contract to a non-provider).
+
+**Reason** — Reusing the existing event catalogue and the `audit_logs` trigger points means one
+place generates events; a dedicated persisted table gives durable per-admin read state and cheap
+unread counts without touching the delivery path. This satisfies the "extend, do not duplicate" rule
+([`AGENTS.md`](AGENTS.md) §12).
+
+**Consequences** — *Positive:* no parallel event taxonomy, durable read/unread state, idempotent
+generation, and zero impact on outbound delivery or the provider contract. *Negative:* one more
+table and one more write path per notifiable event; the `link_url` relative-path rule must be
+enforced by validation wherever a notification is created.
+
+**Related** — [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15; [`DATABASE.md`](DATABASE.md) §3.24;
+[`ARCHITECTURE.md`](ARCHITECTURE.md) §14.4; ADR-010; ADR-011.
+
+---
+
+## ADR-039: Public status-page auto-refresh = client-side periodic refresh (no real-time infra)
+
+**Status** — Accepted (foundations; owning phase [`PLAN.md`](PLAN.md) Phase A)
+
+**Context** — [`STATUS-PAGE.md`](STATUS-PAGE.md) §8.2 recommends a Turbo-based poll but ships no
+polling element at Phase 8; visitors must reload manually. A live-updating page is wanted without
+adding WebSockets/SSE or any real-time infrastructure, and the page **must remain fully correct
+without JavaScript** ([`STATUS-PAGE.md`](STATUS-PAGE.md) §8.2, §8.5).
+
+**Decision** — The public status page **auto-refreshes on the client** by periodically re-fetching
+the **existing** status route/DTO (`/status/{slug}` or the existing `status.json`) — **no new route,
+no new real-time infra**. Specifically:
+
+- **Interval options** are **1 / 5 / 10 / 30 / 60 minutes**, with a sensible default (5 minutes)
+  and persistence of the visitor's choice.
+
+  > **Amendment (Requirement 25 implementation).** The **default interval is 1 minute**, not 5.
+  > Requirement 25 explicitly specifies "DEFAULT 1 minute" and it is the authoritative
+  > product requirement (`ADR-039` → `PRD.md`/Requirement precedence per [`AGENTS.md`](AGENTS.md)
+  > §18.2: product requirements outrank this ADR). The allowed set is unchanged. The refresh
+  > mechanism is a partial in-place update: `fetch` of the **existing** `status.json` route
+  > (same visibility gate, same public DTO) re-renders the banner/service region and updates the
+  > footer `<time>`; a failed fetch is non-fatal and leaves the server-rendered page intact.
+  > Settings persist in `localStorage` (`sentinel.status.refresh`).
+- A **countdown** shows time to the next refresh and communicates the semantics ("refreshing in
+  …").
+- **Requests never overlap**: a new refresh is not started while the previous one is in flight
+  (non-overlapping requests).
+- **Visibility-based pausing**: the timer pauses when the document is hidden
+  (`document.visibilitychange`) and resumes on return, so a backgrounded tab does not poll.
+- The refresh is **progressive enhancement only** — the server-rendered HTML is complete and correct
+  on first paint; with JavaScript disabled the page simply does not auto-refresh (a manual reload
+  still works). The refresh path performs **no outbound probe and enqueues no job**
+  ([`STATUS-PAGE.md`](STATUS-PAGE.md) §10.1).
+
+**Alternatives considered** — A WebSocket/SSE channel (rejected: new real-time infrastructure, no
+benefit for a page whose data changes on the check cadence); a server meta-refresh (rejected: no
+countdown, no visibility pause, no interval control, worse UX); a Turbo Stream subscription
+(considered: Turbo is sanctioned, but a plain periodic re-fetch of the existing route is simpler and
+avoids a broadcast backend).
+
+**Reason** — The status data only changes on the check cadence, so periodic re-fetching of the
+existing route is the cheapest correct mechanism; it needs no new endpoint, no broadcast service,
+and no change to the caching/redaction path.
+
+**Consequences** — *Positive:* live-feeling page with zero new infrastructure; respects the
+server-rendered, no-SPA architecture; pauses when hidden to avoid wasted load on the only
+high-traffic public endpoint. *Negative:* updates are only as fresh as the chosen interval (bounded
+by the projection cache TTL); without JS the page is static until reload (acceptable and documented).
+
+**Related** — [`STATUS-PAGE.md`](STATUS-PAGE.md) §8.2, §9.3, §10.1;
+[`ARCHITECTURE.md`](ARCHITECTURE.md) §14.4; ADR-002; ADR-029.
+
+---
+
+## ADR-040: Public status-page precise last-update timestamp (UTC ISO-8601, rendered local)
+
+**Status** — Accepted (foundations; owning phase [`PLAN.md`](PLAN.md) Phase A)
+
+**Context** — The public projection currently carries only a **day-level** `updatedDayBucket`
+([`STATUS-PAGE.md`](STATUS-PAGE.md) §8.1, §7.3) to avoid fingerprinting detection cadence. Visitors
+have asked for a precise "last update" time, which is a **freshness signal**, not security detail.
+
+**Decision** — Add a precise, **UTC ISO-8601** timestamp to the **public status DTO** as an
+**allowlisted** field (e.g. `updatedAt`), alongside the existing `updatedDayBucket`. It carries no
+security detail, no rule id, no domain, and no redirect target — it is the projection generation
+time only, and it passes the same single redaction chokepoint (§4). The visitor's browser renders it
+in **local time** as `Last update: H:i dd/mm/yyyy`; the server always emits UTC ISO-8601 and never a
+pre-formatted local string. The existing coarse day bucket is retained for clients that want it.
+
+**Alternatives considered** — Publishing the raw incident start time (rejected: reveals detection
+cadence and is admin-only, §7.3); emitting a pre-formatted local time from the server (rejected: the
+server cannot know the visitor's timezone; UTC ISO-8601 is unambiguous and client-rendered);
+replacing the day bucket entirely (rejected: additive-only, and the coarse bucket is still useful).
+
+**Reason** — The projection timestamp is already implicitly public (the page states when it was
+updated); exposing it precisely in a machine-readable, timezone-neutral form improves freshness
+communication without widening the redaction boundary. Rendering in the visitor's local timezone is
+a presentation concern that belongs on the client.
+
+**Consequences** — *Positive:* precise freshness signal; unambiguous UTC storage; local-time display
+without server-side timezone guessing; additive to the existing DTO. *Negative:* the redaction
+regression test must assert the new field is the **only** timestamp added and that it is the
+projection stamp, not an incident/check timestamp.
+
+**Related** — [`STATUS-PAGE.md`](STATUS-PAGE.md) §4, §8.1; [`ARCHITECTURE.md`](ARCHITECTURE.md)
+§14.4; ADR-013; ADR-029.
+
+---
+
 ## Open Questions / Assumptions
 
 ### Open questions
@@ -1132,3 +1312,77 @@ shared `x-admin-sidebar` component, which they do).
   feedback after launch.
 - No API is exposed at MVP, hence no `personal_access_tokens` table.
 - Screenshots and WhatsApp/Webhook channels are explicitly Future and must not be built now.
+
+---
+
+## ADR-041: Dismissible flash messages - which alerts may be dismissed
+
+**Status** - Accepted (foundation; Requirement 22)
+
+**Context** - Flash messages are rendered **per view** as `x-ui.alert` (there is no central flash
+region in the layout). Requirement 22 asks for a close control on flash messages, but §9 forbids
+critical errors disappearing unexpectedly. Error summaries (`@if ($errors->any())` blocks,
+`@error('ids')` field messages) are **danger**-variant alerts rendered from the validation error bag;
+they are stateful (they clear only when the underlying problem is fixed) and are referenced by
+`aria-describedby` from their fields.
+
+**Decision** - Dismissal is **opt-in** on the shared `x-ui.alert` primitive via a `dismissible`
+boolean (default `false`). Only **success / info / warning** flashes - the transient
+"you did a thing" confirmations (`session('status')` etc.) - are rendered with
+`:dismissible="true"`. **Danger** alerts, and in particular every validation error summary, stay
+**persistent** (no close button) so a user cannot dismiss an unresolved error state. No auto-dismiss
+timer is introduced: none existed before, and Requirement 22 §4 says not to invent one.
+
+**Alternatives considered** - Auto-enable dismissal for every non-danger variant (rejected: too
+implicit; an author must opt in so the intent is explicit at the call site); a timed auto-dismiss for
+success flashes (rejected: no prior behaviour, and it fights users who read slowly / need the text for
+support); a central flash region in `admin-layout` (rejected as the default: it would double-render
+every message already emitted per view - the per-view pattern is retained).
+
+**Consequences** - The `alert` primitive is backward compatible: existing non-dismissible usages render
+exactly as before (no close button, no Alpine hooks). Dismissal is owned by a single small Alpine
+component, `Alpine.data('flashMessage')`, registered in `resources/js/app.js` (per AGENTS.md §7: no
+inline `x-data="{...}"`). `x-show="visible"` + `x-transition` sit on the alert **root** - the element
+that also carries any `mb-*` margin - so dismissing collapses the whole node and leaves no stray gap.
+The close trigger is a real `<button type="button">` with `aria-label`/`title` "Dismiss notification"
+and `x-on:click.stop="dismiss()"`, so it is keyboard-reachable and cannot bubble into a parent action.
+
+## ADR-042: Dashboard summary cards deep-link via query-parameter filters
+
+**Status** - Accepted (Requirement 31, Phase I)
+
+**Context** - The dashboard's four counters (`total`, `operational`, `warning`, `incident`) were
+plain non-interactive `<div>`s. Requirement 31 makes them clickable destinations whose list total
+must equal the card number. The Incidents index already supports a whitelisted `severity` query
+filter, but it filters by severity across **all** states, whereas the counters count only **open**
+(`DETECTED`/`ACKNOWLEDGED`) incidents. The Websites index had **no** filters at all.
+
+**Decision** -
+
+- **Reuse the existing query-parameter filter idiom** (`->when(...)` + `->withQueryString()`), the
+  same mechanism already used by `IncidentController@index`. No new filter framework.
+- **Incidents card links** carry `?severity=WARNING|CRITICAL` (uppercase, matching the frozen
+  `incidents.severity` ENUM and the controller whitelist) **plus `?open=1`**. A new, additive `open`
+  filter restricts the list to `status IN (DETECTED, ACKNOWLEDGED)` — the exact set the counters use —
+  so the card total equals the list total. An explicit, valid `status` filter still takes precedence
+  over `open` (a deliberate resolved-state choice is respected).
+- **Websites operational filter** is a new `?status=UP|DOWN|unknown` query parameter on
+  `WebsiteController@index`, applied to the real query (whitelisted; anything else is ignored and the
+  list falls back to unfiltered). **`UP` is `status_availability === 'UP'` — it is NOT `is_active`.**
+  `DOWN` maps to `status_availability = 'DOWN'` and `unknown` to `status_availability IS NULL`; the
+  required card uses `UP`.
+- **Affordance** - cards are real `<a>` anchors (naturally keyboard-focusable, same-tab), with
+  `hover`/`focus-visible` ring states and a trailing chevron; the existing `x-ui` card aesthetic and
+  semantic tokens are preserved (no `dark:` variants).
+
+**Alternatives considered** - Filtering the Incidents list by `severity` alone (rejected: the count
+would overstate, including resolved incidents); a dedicated `/admin/websites?operational=1` boolean
+(rejected: `status` reads more naturally and already matches the column domain); making the whole
+card a `<button>` with JS navigation (rejected: anchors are the correct, dependency-free primitive
+and open in the same tab).
+
+**Consequences** - Card numbers and their destination list totals are reconcilable and covered by
+tests (`AdminDashboardTest`, `DashboardHealthTest`, `IncidentHttpTest`, `WebsiteCrudTest`). The
+filtered pages are bookmarkable/refreshable and survive pagination/`per_page` because
+`withQueryString()` is retained. No schema, dependency, or authorization change — all destinations
+remain inside the `auth` + `session.timeouts` + `admin` route group.

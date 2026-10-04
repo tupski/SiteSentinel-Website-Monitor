@@ -506,4 +506,975 @@ Alpine.data('pushOptin', (options = {}) => ({
     },
 }));
 
+/**
+ * Dismissible flash message (Requirement 22).
+ *
+ * Owns only the `visible` boolean behind `x-ui.alert`'s dismissible mode:
+ * `x-show` on the alert root tears the whole node (and its `mb-*` margin) out
+ * of the flow with an Alpine transition, so no empty container is left behind.
+ * There is no auto-dismiss timer — the user closes the message explicitly.
+ * Defined here (not inline in Blade) per the project's Alpine-component rule.
+ */
+Alpine.data('flashMessage', () => ({
+    visible: true,
+
+    dismiss() {
+        this.visible = false;
+    },
+}));
+
+/**
+ * Precise local-time footer (Requirement 26, ADR-040).
+ *
+ * The server emits the projection stamp as UTC ISO-8601 on a `<time datetime>`;
+ * this component renders it in the VISITOR'S own timezone/locale as
+ * `Last update: H:i dd/mm/yyyy`. Missing/invalid stamps fall back to the
+ * server-rendered day-level text (its textContent), never `Invalid Date`.
+ */
+Alpine.data('statusLocalTime', (options = {}) => ({
+    iso: options.iso || '',
+    display: '',
+
+    init() {
+        this.render();
+    },
+
+    render() {
+        const text = this.format(this.iso);
+
+        if (text !== null) {
+            this.display = 'Last update: ' + text;
+        }
+    },
+
+    /**
+     * Format an ISO-8601 instant in the visitor's locale as `H:i dd/mm/yyyy`,
+     * or null when the input is absent/unparseable.
+     */
+    format(iso) {
+        if (! iso) {
+            return null;
+        }
+
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+            return null;
+        }
+
+        let parts;
+        try {
+            parts = new Intl.DateTimeFormat(undefined, {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+            }).formatToParts(date);
+        } catch (e) {
+            return null;
+        }
+
+        const pick = (type) => {
+            const part = parts.find((p) => p.type === type);
+            return part ? part.value : null;
+        };
+
+        let hour = pick('hour');
+        const minute = pick('minute');
+        const day = pick('day');
+        const month = pick('month');
+        const year = pick('year');
+
+        // `hour12: false` may yield "24" for midnight in some ICU builds.
+        if (hour === '24') {
+            hour = '00';
+        }
+
+        if (hour && minute && day && month && year) {
+            return hour + ':' + minute + ' ' + day + '/' + month + '/' + year;
+        }
+
+        return null;
+    },
+}));
+
+/**
+ * Auto-refresh control (Requirement 25, ADR-039).
+ *
+ * Progressively enhances the server-rendered status page by periodically
+ * re-fetching the EXISTING public projection route (`status.json`) — no new
+ * endpoint, no real-time infrastructure, and never an outbound probe (the JSON
+ * endpoint serves the cached projection only). A successful fetch re-renders
+ * the banner + service region in place and updates the footer timestamp.
+ *
+ * The countdown is computed from a target timestamp (not a naive decrement) so
+ * it cannot drift; requests never overlap (in-flight guard); the timer pauses
+ * while the document is hidden and resumes on return; timers/listeners are
+ * removed in `destroy()` (Alpine's hook for node teardown, including Turbo
+ * navigations). The visitor's toggle + interval persist in localStorage.
+ */
+Alpine.data('statusRefresh', (options = {}) => ({
+    jsonUrl: options.jsonUrl || '',
+    allowedIntervals: options.allowedIntervals || [60, 300, 600, 1800, 3600],
+    defaults: options.defaults || { enabled: false, interval: 60 },
+    storageKey: options.storageKey || 'sentinel.status.refresh',
+    messages: options.messages || {},
+
+    enabled: false,
+    interval: 60,
+    loading: false,
+    remaining: 0,
+    target: 0,
+    ticker: null,
+    visibilityHandler: null,
+
+    init() {
+        this.restore();
+
+        this.visibilityHandler = () => this.onVisibilityChange();
+        document.addEventListener('visibilitychange', this.visibilityHandler);
+
+        this.$watch('enabled', (value) => {
+            if (value) {
+                this.start();
+            } else {
+                this.stop();
+            }
+        });
+
+        if (this.enabled) {
+            this.start();
+        }
+    },
+
+    destroy() {
+        this.clearTicker();
+
+        if (this.visibilityHandler !== null) {
+            document.removeEventListener('visibilitychange', this.visibilityHandler);
+            this.visibilityHandler = null;
+        }
+    },
+
+    toggle(value) {
+        this.enabled = Boolean(value);
+        this.persist();
+    },
+
+    /**
+     * Interval changed: persist and reset the countdown to the new cadence.
+     */
+    applyInterval() {
+        const value = Number(this.interval);
+
+        if (this.allowedIntervals.includes(value)) {
+            this.interval = value;
+        } else {
+            this.interval = this.defaults.interval || 60;
+        }
+
+        this.persist();
+
+        if (this.enabled) {
+            this.start();
+        }
+    },
+
+    start() {
+        this.schedule();
+        this.ensureTicker();
+        this.tick();
+    },
+
+    stop() {
+        this.clearTicker();
+        this.remaining = 0;
+        this.target = 0;
+    },
+
+    /**
+     * Arm the next refresh for `interval` seconds from now.
+     */
+    schedule() {
+        this.target = Date.now() + this.interval * 1000;
+        this.remaining = this.interval * 1000;
+    },
+
+    ensureTicker() {
+        if (this.ticker !== null) {
+            return;
+        }
+
+        this.ticker = window.setInterval(() => this.tick(), 1000);
+    },
+
+    clearTicker() {
+        if (this.ticker !== null) {
+            window.clearInterval(this.ticker);
+            this.ticker = null;
+        }
+    },
+
+    tick() {
+        if (! this.enabled) {
+            return;
+        }
+
+        if (this.isHidden()) {
+            // Paused while hidden; the deadline is re-armed on return.
+            return;
+        }
+
+        const msLeft = this.target - Date.now();
+
+        if (msLeft <= 0) {
+            this.refresh();
+            return;
+        }
+
+        this.remaining = msLeft;
+    },
+
+    onVisibilityChange() {
+        if (! this.enabled) {
+            return;
+        }
+
+        if (this.isHidden()) {
+            this.clearTicker();
+            return;
+        }
+
+        // Returning to a visible tab: re-arm from now so a long background
+        // period cannot trigger an immediate burst, then resume ticking.
+        this.schedule();
+        this.ensureTicker();
+        this.tick();
+    },
+
+    isHidden() {
+        return document.visibilityState === 'hidden';
+    },
+
+    refreshNow() {
+        this.refresh();
+    },
+
+    /**
+     * Fetch the existing public JSON projection and re-render the status
+     * region. Overlapping requests are prevented with the `loading` flag.
+     */
+    refresh() {
+        if (this.loading) {
+            return;
+        }
+
+        if (! this.isHidden()) {
+            this.ensureTicker();
+        }
+
+        this.loading = true;
+
+        window
+            .fetch(this.jsonUrl, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            })
+            .then((response) => {
+                if (! response.ok) {
+                    throw new Error('status ' + response.status);
+                }
+
+                return response.json();
+            })
+            .then((data) => {
+                this.applyPayload(data);
+            })
+            .catch(() => {
+                // A failed refresh is non-fatal: the server-rendered page stays
+                // intact and the countdown simply restarts.
+            })
+            .finally(() => {
+                this.loading = false;
+                this.restartAfterRefresh();
+            });
+    },
+
+    restartAfterRefresh() {
+        if (this.enabled) {
+            this.schedule();
+
+            // Do not spin the ticker up again while the tab is hidden; the
+            // `visibilitychange` handler resumes it on return.
+            if (! this.isHidden()) {
+                this.ensureTicker();
+            }
+        }
+    },
+
+    /**
+     * Apply the public DTO to the visible region without a full page load.
+     */
+    applyPayload(data) {
+        if (data === null || typeof data !== 'object') {
+            return;
+        }
+
+        const banner = document.getElementById('status-banner');
+        if (banner && typeof data.banner === 'string') {
+            banner.textContent = data.banner;
+        }
+
+        const list = document.getElementById('status-services');
+        if (list && Array.isArray(data.services)) {
+            this.renderServices(list, data.services);
+        }
+
+        this.updateTimestamp(document.getElementById('status-last-update'), data.updatedAt);
+    },
+
+    renderServices(list, services) {
+        list.textContent = '';
+
+        if (services.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'p-4 text-sm text-text-subtle';
+            empty.textContent = 'No services published.';
+            list.appendChild(empty);
+            return;
+        }
+
+        services.forEach((service) => {
+            const item = document.createElement('li');
+            item.className = 'flex items-center justify-between gap-4 p-4';
+
+            const left = document.createElement('div');
+            const name = document.createElement('p');
+            name.className = 'font-medium text-text';
+            name.textContent = service.displayName ?? '';
+            const updated = document.createElement('p');
+            updated.className = 'text-xs text-text-subtle';
+            updated.textContent = 'Updated ' + (service.dayBucket ?? '');
+            left.appendChild(name);
+            left.appendChild(updated);
+
+            const label = document.createElement('p');
+            label.className = 'text-sm font-semibold text-text';
+            label.textContent = service.publicLabel ?? '';
+            if (service.responseBand) {
+                const band = document.createElement('span');
+                band.className = 'ml-2 font-normal text-text-subtle';
+                band.textContent = '(' + service.responseBand + ')';
+                label.appendChild(document.createTextNode(' '));
+                label.appendChild(band);
+            }
+
+            item.appendChild(left);
+            item.appendChild(label);
+            list.appendChild(item);
+        });
+    },
+
+    /**
+     * Update the footer `<time>` element: the machine-readable `datetime`
+     * attribute stays UTC ISO-8601, the visible text re-renders in local time.
+     */
+    updateTimestamp(element, iso) {
+        if (! element || typeof iso !== 'string' || iso === '') {
+            return;
+        }
+
+        const formatted = this.formatInstant(iso);
+        if (formatted === null) {
+            return;
+        }
+
+        element.setAttribute('datetime', iso);
+        element.textContent = 'Last update: ' + formatted;
+    },
+
+    formatInstant(iso) {
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+            return null;
+        }
+
+        try {
+            const parts = new Intl.DateTimeFormat(undefined, {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+            }).formatToParts(date);
+
+            const pick = (type) => {
+                const part = parts.find((p) => p.type === type);
+                return part ? part.value : null;
+            };
+
+            let hour = pick('hour');
+            const minute = pick('minute');
+            const day = pick('day');
+            const month = pick('month');
+            const year = pick('year');
+
+            if (hour === '24') {
+                hour = '00';
+            }
+
+            if (hour && minute && day && month && year) {
+                return hour + ':' + minute + ' ' + day + '/' + month + '/' + year;
+            }
+        } catch (e) {
+            return null;
+        }
+
+        return null;
+    },
+
+    get countdownDisplay() {
+        if (! this.enabled) {
+            return '';
+        }
+
+        if (this.isHidden()) {
+            return this.messages.paused || 'Paused';
+        }
+
+        const total = Math.max(0, Math.ceil(this.remaining / 1000));
+        const minutes = String(Math.floor(total / 60)).padStart(2, '0');
+        const seconds = String(total % 60).padStart(2, '0');
+
+        return (this.messages.nextRefreshIn || 'Next refresh in:') + ' ' + minutes + ':' + seconds;
+    },
+
+    restore() {
+        let saved = null;
+        try {
+            const raw = window.localStorage.getItem(this.storageKey);
+            saved = raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            saved = null;
+        }
+
+        if (saved && typeof saved === 'object') {
+            this.enabled = saved.enabled === true;
+
+            const value = Number(saved.interval);
+            this.interval = this.allowedIntervals.includes(value)
+                ? value
+                : (this.defaults.interval || 60);
+        } else {
+            this.enabled = this.defaults.enabled === true;
+            this.interval = this.defaults.interval || 60;
+        }
+    },
+
+    persist() {
+        try {
+            window.localStorage.setItem(this.storageKey, JSON.stringify({
+                enabled: this.enabled,
+                interval: this.interval,
+            }));
+        } catch (e) {
+            // Private mode / storage disabled: state still works for this page.
+        }
+    },
+}));
+
+/**
+ * In-app notification centre — bell + dropdown (Requirement 28 / Phase H,
+ * ADR-038, NOTIFICATIONS.md §15).
+ *
+ * A thin client over the EXISTING Phase G JSON endpoints
+ * (`admin.notifications.in-app.*`). It owns only local UI state (open/closed,
+ * the fetched rows, the unread count) and never generates notifications —
+ * generation is backend (ADR-038). It is NOT real-time: it polls the cheap
+ * unread-count endpoint on a fixed interval and (lazily) loads the recent list
+ * only when the panel is first opened.
+ *
+ * Defined here — never inline in a Blade `x-data` attribute — per AGENTS.md §7.
+ * Non-overlapping requests are guarded with in-flight flags; polling pauses
+ * while the document is hidden and resumes on return; the interval and the
+ * visibility listener are torn down in `destroy()` (Alpine's node-teardown
+ * hook, which also fires on Turbo navigations).
+ */
+Alpine.data('notificationCenter', (options = {}) => ({
+    indexUrl: options.indexUrl || '',
+    unreadCountUrl: options.unreadCountUrl || '',
+    readAllUrl: options.readAllUrl || '',
+    markReadUrlTemplate: options.markReadUrlTemplate || '',
+    fullPageUrl: options.fullPageUrl || '',
+    csrfToken: options.csrfToken || '',
+    pollInterval: options.pollInterval || 60000,
+    messages: options.messages || {},
+
+    open: false,
+    unreadCount: 0,
+    items: [],
+    loading: false,
+    error: false,
+    busy: false,
+    loadedOnce: false,
+    previousFocus: null,
+    pollTimer: null,
+    visibilityHandler: null,
+    countInFlight: false,
+    listInFlight: false,
+
+    init() {
+        this.pollTimer = window.setInterval(() => this.poll(), this.pollInterval);
+
+        this.visibilityHandler = () => this.onVisibilityChange();
+        document.addEventListener('visibilitychange', this.visibilityHandler);
+
+        // Seed the badge without opening the panel (one cheap count request).
+        this.poll();
+    },
+
+    destroy() {
+        if (this.pollTimer !== null) {
+            window.clearInterval(this.pollTimer);
+            this.pollTimer = null;
+        }
+
+        if (this.visibilityHandler !== null) {
+            document.removeEventListener('visibilitychange', this.visibilityHandler);
+            this.visibilityHandler = null;
+        }
+    },
+
+    openMenu() {
+        this.previousFocus = document.activeElement;
+        this.open = true;
+        this.load();
+    },
+
+    closeMenu(returnFocus = false) {
+        this.open = false;
+
+        if (returnFocus) {
+            this.$refs.trigger.focus();
+        }
+    },
+
+    toggle() {
+        this.open ? this.closeMenu(true) : this.openMenu();
+    },
+
+    onTriggerKeydown(event) {
+        if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
+            event.preventDefault();
+            this.openMenu();
+        }
+    },
+
+    onVisibilityChange() {
+        if (document.visibilityState === 'hidden') {
+            if (this.pollTimer !== null) {
+                window.clearInterval(this.pollTimer);
+                this.pollTimer = null;
+            }
+
+            return;
+        }
+
+        if (this.pollTimer === null) {
+            this.pollTimer = window.setInterval(() => this.poll(), this.pollInterval);
+        }
+
+        this.poll();
+    },
+
+    poll() {
+        if (document.visibilityState === 'hidden') {
+            return;
+        }
+
+        this.refreshCount();
+    },
+
+    /**
+     * Cheap unread-count poll. Non-overlapping (in-flight guard); a failure is
+     * non-fatal and the next tick retries.
+     */
+    refreshCount() {
+        if (this.countInFlight) {
+            return;
+        }
+
+        this.countInFlight = true;
+
+        window
+            .fetch(this.unreadCountUrl, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            })
+            .then((response) => (response.ok ? response.json() : Promise.reject(new Error('count'))))
+            .then((data) => this.applyCount(data ? data.unread_count : undefined))
+            .catch(() => {
+                // Non-fatal: the server-rendered shell stays intact.
+            })
+            .finally(() => {
+                this.countInFlight = false;
+            });
+    },
+
+    /**
+     * Load the recent list (lazily, on first open). Non-overlapping.
+     */
+    load() {
+        if (this.listInFlight) {
+            return;
+        }
+
+        this.listInFlight = true;
+        this.loading = true;
+        this.error = false;
+
+        window
+            .fetch(this.indexUrl, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            })
+            .then((response) => {
+                if (! response.ok) {
+                    throw new Error('list');
+                }
+
+                return response.json();
+            })
+            .then((data) => {
+                this.items = this.mapItems(Array.isArray(data.data) ? data.data : []);
+                this.applyCount(data.unread_count);
+                this.loadedOnce = true;
+            })
+            .catch(() => {
+                this.error = true;
+            })
+            .finally(() => {
+                this.loading = false;
+                this.listInFlight = false;
+            });
+    },
+
+    /**
+     * Map the documented JSON contract to display rows. `link_url` is only
+     * accepted when it is a valid internal relative path (never an external
+     * URL), so a tampered payload cannot become an open-redirect surface.
+     */
+    mapItems(rows) {
+        return rows.map((row) => ({
+            id: row.id,
+            title: typeof row.title === 'string' ? row.title : '',
+            body: typeof row.body === 'string' ? row.body : '',
+            read: row.read_at !== null && row.read_at !== undefined,
+            link: this.safeLink(row.link_url),
+            time: this.relativeTime(row.created_at),
+            icon: this.iconFor(row.severity),
+            iconColor: this.iconColorFor(row.severity),
+        }));
+    },
+
+    iconFor(severity) {
+        return {
+            success: 'check-circle',
+            warning: 'exclamation-triangle',
+            danger: 'x-circle',
+        }[severity] || 'bell';
+    },
+
+    iconColorFor(severity) {
+        return {
+            info: 'text-info',
+            success: 'text-success',
+            warning: 'text-warning',
+            danger: 'text-danger',
+        }[severity] || 'text-text-subtle';
+    },
+
+    safeLink(url) {
+        if (typeof url !== 'string' || url === '') {
+            return null;
+        }
+
+        if (url[0] !== '/' || url.startsWith('//') || url.includes('\\') || url.includes('://')) {
+            return null;
+        }
+
+        return url;
+    },
+
+    relativeTime(iso) {
+        if (typeof iso !== 'string' || iso === '') {
+            return '';
+        }
+
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+            return '';
+        }
+
+        const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+
+        if (seconds < 60) {
+            return 'just now';
+        }
+
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) {
+            return minutes + 'm ago';
+        }
+
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) {
+            return hours + 'h ago';
+        }
+
+        const days = Math.floor(hours / 24);
+        if (days < 7) {
+            return days + 'd ago';
+        }
+
+        return date.toLocaleDateString();
+    },
+
+    /**
+     * Mark one row read. On success the count is updated IMMEDIATELY from the
+     * server response (never assumed); on failure the row is left untouched and
+     * the error state is shown honestly.
+     */
+    async markRead(id) {
+        if (this.busy) {
+            return;
+        }
+
+        const item = this.items.find((entry) => entry.id === id);
+        if (! item || item.read) {
+            return;
+        }
+
+        this.busy = true;
+        this.error = false;
+
+        try {
+            const response = await window.fetch(this.markReadUrl(id), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': this.csrfToken,
+                },
+                credentials: 'same-origin',
+            });
+
+            if (! response.ok) {
+                throw new Error('mark-read');
+            }
+
+            const data = await response.json();
+            item.read = true;
+            this.applyCount(data.unread_count);
+        } catch (e) {
+            this.error = true;
+        } finally {
+            this.busy = false;
+        }
+    },
+
+    async markAllRead() {
+        if (this.busy || this.unreadCount === 0) {
+            return;
+        }
+
+        this.busy = true;
+        this.error = false;
+
+        try {
+            const response = await window.fetch(this.readAllUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': this.csrfToken,
+                },
+                credentials: 'same-origin',
+            });
+
+            if (! response.ok) {
+                throw new Error('read-all');
+            }
+
+            const data = await response.json();
+            this.items.forEach((entry) => {
+                entry.read = true;
+            });
+            this.applyCount(data.unread_count);
+        } catch (e) {
+            this.error = true;
+        } finally {
+            this.busy = false;
+        }
+    },
+
+    applyCount(value) {
+        if (typeof value === 'number') {
+            this.unreadCount = value;
+        }
+    },
+
+    markReadUrl(id) {
+        return this.markReadUrlTemplate.replace('__ID__', String(id));
+    },
+
+    get badgeText() {
+        return this.unreadCount > 99 ? '99+' : String(this.unreadCount);
+    },
+
+    get countLabel() {
+        return this.unreadCount + ' ' + (this.messages.unread || 'unread');
+    },
+}));
+
+/**
+ * Full-page notification list enhancement (Requirement 28 / Phase H, ADR-038).
+ *
+ * The page is fully server-rendered and correct without JavaScript; this
+ * component only upgrades the "Mark as read" / "Mark all as read" controls to
+ * the EXISTING Phase G JSON endpoints and updates the visible unread count in
+ * place. A failed request surfaces an honest inline error and never pretends
+ * success.
+ */
+Alpine.data('notificationList', (options = {}) => ({
+    readAllUrl: options.readAllUrl || '',
+    csrfToken: options.csrfToken || '',
+    messages: options.messages || {},
+    busy: false,
+
+    async markRead(event) {
+        if (this.busy) {
+            return;
+        }
+
+        const button = event.currentTarget;
+        const url = button.dataset.url;
+        if (! url) {
+            return;
+        }
+
+        this.busy = true;
+        this.clearError();
+
+        try {
+            const response = await window.fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': this.csrfToken,
+                },
+                credentials: 'same-origin',
+            });
+
+            if (! response.ok) {
+                throw new Error('mark-read');
+            }
+
+            const data = await response.json();
+            this.markRowRead(button.closest('[data-notification-row]'));
+            button.remove();
+            this.updateCount(data.unread_count);
+        } catch (e) {
+            this.showError(this.messages.failed);
+        } finally {
+            this.busy = false;
+        }
+    },
+
+    async markAllRead() {
+        if (this.busy) {
+            return;
+        }
+
+        this.busy = true;
+        this.clearError();
+
+        try {
+            const response = await window.fetch(this.readAllUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': this.csrfToken,
+                },
+                credentials: 'same-origin',
+            });
+
+            if (! response.ok) {
+                throw new Error('read-all');
+            }
+
+            const data = await response.json();
+
+            this.$root.querySelectorAll('[data-notification-row]').forEach((row) => this.markRowRead(row));
+            this.$root.querySelectorAll('[data-notification-read]').forEach((el) => el.remove());
+
+            this.updateCount(data.unread_count);
+        } catch (e) {
+            this.showError(this.messages.failedAll);
+        } finally {
+            this.busy = false;
+        }
+    },
+
+    markRowRead(row) {
+        if (! row) {
+            return;
+        }
+
+        row.dataset.read = 'true';
+        row.classList.remove('bg-info-muted/40');
+
+        const unread = row.querySelector('[data-notification-status="unread"]');
+        const read = row.querySelector('[data-notification-status="read"]');
+
+        if (unread) {
+            unread.classList.add('hidden');
+        }
+
+        if (read) {
+            read.classList.remove('hidden');
+        }
+    },
+
+    updateCount(value) {
+        if (typeof value !== 'number') {
+            return;
+        }
+
+        this.$root.querySelectorAll('[data-notification-list-count]').forEach((el) => {
+            el.textContent = value + ' ' + (this.messages.unread || 'unread');
+        });
+    },
+
+    showError(message) {
+        const box = this.$root.querySelector('[data-notification-list-error]');
+        if (box) {
+            box.textContent = message || '';
+            box.classList.remove('hidden');
+        }
+    },
+
+    clearError() {
+        const box = this.$root.querySelector('[data-notification-list-error]');
+        if (box) {
+            box.textContent = '';
+            box.classList.add('hidden');
+        }
+    },
+}));
+
 Alpine.start();

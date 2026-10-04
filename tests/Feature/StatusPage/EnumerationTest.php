@@ -138,8 +138,10 @@ final class EnumerationTest extends StatusPageTestCase
 
         $this->assertIsArray($decoded);
         $this->assertArrayHasKey('services', $decoded);
-        // The DTO allowlist is exactly these three keys.
-        $this->assertSame(['banner', 'services', 'updatedDayBucket'], array_keys($decoded));
+        // The DTO allowlist is exactly these four keys (`updatedAt` is the
+        // precise projection stamp added by ADR-040 — a freshness signal, not
+        // security detail; see RedactionRegressionTest).
+        $this->assertSame(['banner', 'services', 'updatedDayBucket', 'updatedAt'], array_keys($decoded));
     }
 
     public function test_public_output_has_no_admin_links_or_internal_paths(): void

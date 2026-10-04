@@ -59,10 +59,17 @@ final class StatusProjector
             $sortIndex++;
         }
 
+        $utcNow = $now->copy()->setTimezone('UTC');
+
         return new PublicStatusDTO(
             banner: $this->banner($services),
             services: $services,
-            updatedDayBucket: $now->copy()->setTimezone('UTC')->format('Y-m-d'),
+            // The coarse day bucket and the precise ISO-8601 stamp are derived
+            // from the SAME `$now` (the projection generation time) so they can
+            // never disagree (STATUS-PAGE.md §8.1, ADR-040). The stamp is the
+            // projection time only — never an incident or check timestamp.
+            updatedDayBucket: $utcNow->format('Y-m-d'),
+            updatedAt: $utcNow->format('Y-m-d\TH:i:s\Z'),
         );
     }
 

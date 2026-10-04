@@ -145,4 +145,29 @@
             </div>
         @endforeach
     </div>
+
+    {{-- Requirement 27: collapse/expand control pinned to the BOTTOM of the
+         sidebar. It is a non-scrolling footer sibling of the scrollable nav
+         (`min-h-0 flex-1 overflow-y-auto` above), so it can never overlap the
+         nav items or any other sidebar content. Desktop only (`md:flex`): the
+         collapsed state only affects the md+ rail, and on mobile the off-canvas
+         drawer keeps its own dedicated close control in the shell. --}}
+    <div class="shrink-0 border-t border-border p-2">
+        <button type="button"
+                data-sidebar-collapse
+                x-on:click="toggleCollapse()"
+                x-bind:aria-expanded="collapsed ? 'false' : 'true'"
+                x-bind:aria-label="collapseLabel()"
+                x-bind:title="collapseLabel()"
+                aria-label="{{ __('Collapse sidebar') }}"
+                aria-controls="admin-sidebar"
+                title="{{ __('Collapse sidebar') }}"
+                class="hidden w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus md:flex">
+            <span class="shrink-0" aria-hidden="true">
+                <x-ui.icon name="chevron-double-left" class="h-5 w-5" data-collapse-icon="collapse" x-show="!collapsed" />
+                <x-ui.icon name="chevron-double-right" class="h-5 w-5" data-collapse-icon="expand" x-show="collapsed" x-cloak />
+            </span>
+            <span class="truncate" data-sidebar-label>{{ __('Collapse sidebar') }}</span>
+        </button>
+    </div>
 </div>

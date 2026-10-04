@@ -588,7 +588,7 @@ flowchart TD
 | **Overall banner** | Worst coarse label (§6.6) | No cause named |
 | **Website rows** | One row per published website: display name/alias + coarse label + (optional) coarse response band | No URL/host by default; no security value |
 | **Incident section** | Active incidents as coarse label + time bucket | No type/severity/evidence |
-| **Last-updated** | A single page-level "updated at" timestamp | Coarse; shows freshness of the projection |
+| **Last-updated** | A single page-level "updated at" timestamp — a **precise UTC ISO-8601** value rendered in the visitor's local timezone (ADR-040), plus the coarse day bucket | The precise value is the **projection generation stamp only**; never an incident/check timestamp |
 | **Footer** | Optional custom footer text | MUST NOT leak version/internal paths |
 
 ### 8.2 Auto-refresh
@@ -609,6 +609,36 @@ is a plain server-rendered Blade document that loads the Vite CSS/JS bundle; it 
 Turbo polling element or meta-refresh at MVP. The page is complete and correct on first paint with
 JavaScript disabled, and the freshness signal is the day-level "Updated" line (§8.1). The projection
 cache TTL (§9.2) bounds how stale a served page may be; a visitor reloads to observe new state.
+
+**Phase A auto-refresh (ADR-039).** A **client-side periodic refresh** is added as progressive
+enhancement — it re-fetches the **existing** status route/DTO on a timer (no new route, no real-time
+infrastructure, no outbound probe, no job). The refresh:
+
+- offers **interval options 1 / 5 / 10 / 30 / 60 minutes** (default **1** — see the amendment in
+  [`DECISIONS.md`](DECISIONS.md) ADR-039), persisted for the visitor;
+- shows a **countdown** to the next refresh ("Next refresh in: mm:ss");
+- never overlaps requests — a new fetch is not started while the previous one is in flight;
+- **pauses while the document is hidden** (`document.visibilitychange`) and resumes on return.
+
+With JavaScript disabled the page simply does not auto-refresh; a manual reload still works. This
+does not change the server-rendered, no-SPA architecture (`ADR-002`) or the caching/redaction path
+(§4, §9).
+
+**Implemented mechanism (Phase A).** The control is the `statusRefresh` Alpine component
+(`resources/js/app.js`); the countdown is computed from a target timestamp (drift-free) and updated
+every second. A refresh `fetch`es the **existing** `status.json` route (same visibility gate and
+same public DTO as the HTML page — never a new endpoint), re-renders the banner/service region in
+place, and updates the footer `<time>`. The visitor's toggle + interval persist in `localStorage`
+under `sentinel.status.refresh`. Timers and the `visibilitychange` listener are removed in the
+component's `destroy()` hook. The server-rendered control markup is the progressive-enhancement
+baseline; the interval options are rendered server-side so the markup is valid without JS.
+
+**Phase A precise last-update timestamp (ADR-040).** The public status DTO gains an **allowlisted
+UTC ISO-8601 timestamp** (e.g. `updatedAt`) alongside the existing `updatedDayBucket` — the
+**projection generation time**, not an incident/check time. It carries no security detail and passes
+the same single redaction chokepoint (§4). The visitor's browser renders it in **local time** as
+`Last update: H:i dd/mm/yyyy`; the server always emits UTC ISO-8601 and never a pre-formatted local
+string.
 
 ### 8.3 Branding / settings
 

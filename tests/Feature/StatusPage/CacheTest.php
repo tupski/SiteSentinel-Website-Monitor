@@ -9,6 +9,8 @@ use App\Models\StatusPage;
 use App\Services\Incidents\IncidentEngine;
 use App\Services\StatusPage\PublicStatusDTO;
 use App\Services\StatusPage\StatusPageCache;
+use App\Services\StatusPage\StatusProjector;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -247,5 +249,40 @@ final class CacheTest extends StatusPageTestCase
         $this->cache()->invalidate();
 
         $this->assertNotSame($before, $this->cache()->key($page->refresh()));
+    }
+
+    public function test_precise_timestamp_is_the_projection_generation_stamp(): void
+    {
+        $stamp = Carbon::parse('2026-10-04 15:37:00', 'UTC');
+        $this->travelTo($stamp);
+
+        $this->makeWebsite(['status_alias' => 'Alpha']);
+
+        $dto = app(StatusProjector::class)->project($this->defaultPage(), $stamp->copy());
+
+        // Sub-day precision genuinely exists: the stamp is the projection time,
+        // not merely the day bucket (ADR-040). It must share the day bucket's
+        // day and the exact H:i:s of the moment passed to project().
+        $this->assertSame('2026-10-04', $dto->updatedDayBucket);
+        $this->assertSame('2026-10-04T15:37:00Z', $dto->updatedAt);
+    }
+
+    public function test_precise_timestamp_survives_the_cache_round_trip(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-04 15:37:00', 'UTC'));
+
+        $this->makeWebsite(['status_alias' => 'Alpha']);
+
+        // Warm the cache from the projector, then rehydrate through the plain
+        // allowlist array. The precise UTC stamp must come back intact.
+        $this->getJson($this->jsonUrl())->assertOk()->assertJsonPath('updatedAt', '2026-10-04T15:37:00Z');
+
+        $cached = $this->cache()->remember($this->defaultPage());
+
+        $this->assertSame('2026-10-04T15:37:00Z', $cached->updatedAt);
+        $this->assertSame(
+            ['banner', 'services', 'updatedDayBucket', 'updatedAt'],
+            array_keys($cached->toArray())
+        );
     }
 }

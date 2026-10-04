@@ -9,6 +9,7 @@ use App\Http\Requests\StatusPageRequest;
 use App\Models\StatusPage;
 use App\Models\Website;
 use App\Services\Audit\AuditLogger;
+use App\Services\StatusPage\StatusPageAnalytics;
 use App\Services\StatusPage\StatusPageCache;
 use App\Support\PerPage;
 use Illuminate\Http\RedirectResponse;
@@ -29,6 +30,7 @@ final class StatusPageController extends Controller
 {
     public function __construct(
         private readonly AuditLogger $audit,
+        private readonly StatusPageAnalytics $analytics,
     ) {}
 
     public function index(Request $request): View
@@ -43,6 +45,26 @@ final class StatusPageController extends Controller
             ->withQueryString();
 
         return view('admin.status-pages.index', compact('pages'));
+    }
+
+    /**
+     * Internal analytics report for one status page (Requirement 23).
+     *
+     * Admin-only (the route group enforces auth + session timeouts + admin).
+     * All aggregation lives in {@see StatusPageAnalytics}; this method only
+     * validates the reporting period and hands the report to the view
+     * (AGENTS.md §7). The period is allowlisted — unknown values fall back to
+     * the default, never an error.
+     */
+    public function analytics(Request $request, StatusPage $statusPage): View
+    {
+        $period = StatusPageAnalytics::resolvePeriod($request->query('period'));
+
+        return view('admin.status-pages.analytics', [
+            'page' => $statusPage,
+            'analytics' => $this->analytics->report($statusPage, $period),
+            'periods' => StatusPageAnalytics::periods(),
+        ]);
     }
 
     public function create(): View

@@ -144,4 +144,18 @@ final class SharedComponentsTest extends TestCase
         $this->assertStringContainsString('data-theme', $html);
         $this->assertStringContainsString('aria-label="Show password"', $html);
     }
+
+    /**
+     * Requirement 22 — the dismissible flash component's logic lives in
+     * `app.js` (AGENTS.md §7: Alpine component logic is never inline). This
+     * guards against a regression back to an inline `x-data="{...}"` object.
+     */
+    public function test_flash_message_alpine_component_is_registered_in_app_js(): void
+    {
+        $source = file_get_contents(resource_path('js/app.js'));
+
+        $this->assertIsString($source);
+        $this->assertStringContainsString("Alpine.data('flashMessage'", $source);
+        $this->assertStringContainsString('visible: true', $source);
+    }
 }

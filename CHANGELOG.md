@@ -1,5 +1,352 @@
 # Changelog
 
+## [Unreleased] — Phase A foundations (ADRs + in-app notifications + shared icon component)
+
+### Added
+
+- **ADRs (foundations).** `ADR-037` charts/analytics = server-rendered inline SVG (no JS chart
+  library; no fabricated data); `ADR-038` in-app admin notification centre (`admin_notifications`,
+  per-admin, decoupled from outbound delivery); `ADR-039` public status-page auto-refresh
+  (client-side, intervals 1/5/10/30/60 min, non-overlapping, visibility-paused); `ADR-040` precise
+  UTC ISO-8601 last-update timestamp on the public status DTO, rendered in local time.
+- **`admin_notifications` schema** ([`DATABASE.md`](DATABASE.md) §3.24) — per-admin in-app
+  notification rows with `read_at`, a UNIQUE `dedupe_key`, an internal-relative `link_url`, and the
+  `idx_admin_notifications_user_read_created` composite index. Migration
+  `0001_12_02_000000_create_admin_notifications_table.php`.
+- [`app/Models/AdminNotification.php`](app/Models/AdminNotification.php) — `type` constants,
+  `unread()` scope, `markAsRead()`, `user()` belongsTo, and a `firstOrCreate`-style dedupe creation
+  path; [`database/factories/AdminNotificationFactory.php`](database/factories/AdminNotificationFactory.php);
+  `User::adminNotifications()` hasMany.
+- [`resources/views/components/ui/icon.blade.php`](resources/views/components/ui/icon.blade.php) —
+  shared `<x-ui.icon name="…"/>` inline-SVG component (`stroke="currentColor"`, `aria-hidden="true"`).
+
+### Added — Phase G: Requirement 28 (backend) — in-app notification centre generation, persistence, mark-read, routes, authz, dedupe
+
+Implements the backend for FR-111 / [`ADR-038`](DECISIONS.md) / [`NOTIFICATIONS.md`](NOTIFICATIONS.md)
+§15. Additive to — and fully independent of — outbound channel delivery (no dispatcher,
+`notification_logs`, cooldown, suppression, or circuit-breaker changes).
+
+- **Generation service** [`app/Services/Notifications/AdminNotificationService.php`](app/Services/Notifications/AdminNotificationService.php)
+  — `notify(...)`, per-type helpers (`recordIncidentTransition`,
+  `recordMonitoringConfigChanged`, `recordNotificationConfigChanged`), `notifyActiveAdmins(...)`,
+  `activeAdminIds()`, and `unreadCount()`. Content is redacted through `MessageRedactor`; no resolved
+  IP, host, rule id, snapshot path, redirect target, or secret is ever included. `link_url` is
+  validated as an internal relative path only (scheme/host/`//`/backslash/control chars dropped).
+- **Recipient rule (documented):** fanned out to **all active admins** in one query, because
+  incident/security events are system-generated (no acting admin). See [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15.6.
+- **Dedupe scheme:** stable per-event base keys (`incident.down:{id}`, `incident.recovered:{id}`,
+  `security.incident.detected:{id}`, `security.incident.resolved:{id}`,
+  `monitoring.config.changed:{action}:{subjectId}:{ts}:a{actorId}`,
+  `notification.config.changed:{action}:{subjectId}:{ts}:a{actorId}`), scoped per recipient
+  (`{base}:u{userId}`) because the frozen `dedupe_key` UNIQUE index is global; repeated generation
+  never duplicates.
+- **Event wiring (additive):** `incident.down`/`incident.recovered`/security detected/resolved from
+  the incident engine after reconciliation ([`app/Services/Incidents/IncidentEngine.php`](app/Services/Incidents/IncidentEngine.php))
+  and manual resolution in [`app/Http/Controllers/Admin/IncidentController.php`](app/Http/Controllers/Admin/IncidentController.php);
+  `monitoring.config.changed` from [`WebsiteController`](app/Http/Controllers/Admin/WebsiteController.php);
+  `notification.config.changed` from [`NotificationChannelController`](app/Http/Controllers/Admin/NotificationChannelController.php)
+  and [`SystemSettingController`](app/Http/Controllers/Admin/SystemSettingController.php). Routine
+  checks never notify.
+- **Admin routes + JSON contract** (admin-only; ownership enforced in-controller, no policies):
+  `GET /admin/notifications/in-app` (`admin.notifications.in-app.index`),
+  `GET /admin/notifications/in-app/unread-count` (`admin.notifications.in-app.unread-count`),
+  `POST /admin/notifications/in-app/{adminNotification}/read` (`admin.notifications.read`),
+  `POST /admin/notifications/in-app/read-all` (`admin.notifications.read-all`). JSON for
+  AJAX/Turbo, redirect-back-with-flash for non-JS; another admin's id yields 404. Contract documented
+  in [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15.6 for Phase H.
+- **Tests** under `tests/Feature/Notifications/AdminNotifications/`: generation/dedupe, security
+  events, config events, routine-check exclusion, link validation, mark one/all + ownership, authz
+  (guest/viewer), and the JSON contract.
+
+### Added — Phase H: Requirement 28 (frontend) — in-app notification centre UI (bell, badge, dropdown, full page, polling)
+
+Implements the UI for FR-111 / [`ADR-038`](DECISIONS.md) /
+[`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15 against the Phase G JSON contract. No new dependency; no
+dispatcher / `notification_logs` / cooldown / suppression change.
+
+- **Header bell** [`resources/views/components/notification-center.blade.php`](resources/views/components/notification-center.blade.php)
+  inserted into [`resources/views/components/admin-layout.blade.php`](resources/views/components/admin-layout.blade.php)
+  **between the theme switcher and the profile menu**. Accessible `<button type="button">` with
+  `aria-label="Notifications"` + `aria-expanded`; icon switches `bell` → `bell-alert` when unread.
+  The unread badge is hidden at zero and caps the **displayed** text at `99+` while keeping the real
+  count internally and in the accessible label. Panel opens below the trigger on `sm+` (capped to the
+  viewport) and as a fixed full-width sheet on mobile — no horizontal overflow.
+- **Alpine components** (`resources/js/app.js`, registered via `Alpine.data(...)`, never inline):
+  `notificationCenter` (bell + dropdown) and `notificationList` (full-page enhancement). The dropdown
+  has header (title + unread count), recent list (severity icon, title, body, relative time,
+  read/unread state, per-row `Read`), and footer actions `Mark all as read` + `Show all notifications`.
+  Loading (`x-ui.skeleton`), empty (`x-ui.empty-state`) and error (+ retry) states are wired.
+  Individual + mark-all read call the Phase G endpoints via `fetch` and update the unread count
+  **immediately from the response**; failures are honest (error state, no false success). Row
+  navigation uses `link_url` only after re-validating it as an internal relative path.
+- **Polling** (ADR-038: generation is backend; this is not real-time): the cheap `unread-count`
+  endpoint is polled on a fixed interval (60s) with an in-flight guard (non-overlapping), paused via
+  `visibilitychange` while the tab is hidden and resumed on return; the interval and the listener are
+  removed in `destroy()` (Alpine node teardown, incl. Turbo navigations). The panel closes on
+  outside-click and Escape and restores focus.
+- **Full-page view** [`resources/views/admin/notifications/in-app/index.blade.php`](resources/views/admin/notifications/in-app/index.blade.php)
+  + controller action `AdminNotificationController::page()` + route **`GET /admin/notifications/in-app/page`**
+  named **`admin.notifications.in-app.page`** (inside the `auth` + `session.timeouts` + `admin` group;
+  distinct from the outbound-channel `admin.notifications.index`). Server-rendered and correct without
+  JS; filters by `status` (`all`/`unread`/`read`) and `type` (whitelisted against the frozen catalogue);
+  paginates with the shared `x-per-page` conventions; per-row + bulk mark-read enhance via Alpine. It
+  reuses the same per-admin query as the JSON `index` action; `link_url` is re-validated before render
+  (defence in depth) via `AdminNotificationService::isValidInternalPath()`.
+- **Navigation decision.** The existing sidebar "Notification" item (`admin.notifications.index`,
+  outbound channels) is **not hijacked**. The in-app centre is reached from the bell dropdown
+  ("Show all notifications") and is **not** added to the sidebar, to avoid colliding with / confusing
+  the outbound-channel entry.
+- **Docs.** [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15.6 records the Phase H UI contract, the
+  non-real-time polling semantics, and the new full-page route.
+- **Tests.** [`tests/Feature/Ui/NotificationCenterTest.php`](tests/Feature/Ui/NotificationCenterTest.php)
+  (bell DOM order between theme switcher and profile, accessible button, badge cap/hide hooks,
+  registered component + lifecycle cleanup in `app.js`, dropdown actions/states, no inline `x-data`),
+  [`tests/Feature/Notifications/AdminNotifications/AdminNotificationPageTest.php`](tests/Feature/Notifications/AdminNotifications/AdminNotificationPageTest.php)
+  (full-page authz guest/viewer/admin, ownership scoping, status/type filters, relative-link safety),
+  and the new route added to [`tests/Feature/Security/AuthorizationIdorTest.php`](tests/Feature/Security/AuthorizationIdorTest.php).
+  [`tests/Feature/ThemeSwitcherTest.php`](tests/Feature/ThemeSwitcherTest.php) was made robust: its
+  "no theme words outside the panel" check is now scoped to the header (it previously relied on
+  `strip_tags` incidentally swallowing the dashboard's "System health" card).
+
+### Changed — Phase I: Requirement 31 — clickable dashboard cards + incident/website filters
+
+Implements Requirement 31 (see [`DECISIONS.md`](DECISIONS.md) **ADR-042**). No new dependency, no
+schema change, no authorization change (every destination stays inside the `auth` + `session.timeouts`
++ `admin` route group).
+
+- **Clickable summary cards** [`resources/views/admin/dashboard.blade.php`](resources/views/admin/dashboard.blade.php):
+  the four counters (Total / Operational / Warning / Critical) are now real `<a>` anchors — naturally
+  keyboard-focusable, same-tab — with hover + `focus-visible` ring states and a trailing chevron, while
+  preserving the existing card surface/spacing and semantic tokens (no `dark:` variants). Counts are
+  guarded with `?? 0` for graceful degradation. Each card carries a `data-dashboard-card` hook.
+  - **Total Websites** → `admin.websites.index` (all websites).
+  - **Operational** → `admin.websites.index?status=UP`.
+  - **Warning Incidents** → `admin.incidents.index?severity=WARNING&open=1`.
+  - **Critical Incidents** → `admin.incidents.index?severity=CRITICAL&open=1`.
+- **Websites operational filter** [`app/Http/Controllers/Admin/WebsiteController.php`](app/Http/Controllers/Admin/WebsiteController.php):
+  new whitelisted `?status=UP|DOWN|unknown` query parameter applied to the **real query** with the
+  existing `->when(...)` + `->withQueryString()` idiom. **`UP` means `status_availability === 'UP'`,
+  NOT `is_active`.** Invalid values are ignored (unfiltered fallback). The filtered page is
+  bookmarkable and survives pagination / `per_page`.
+- **Websites index UI** [`resources/views/admin/websites/index.blade.php`](resources/views/admin/websites/index.blade.php):
+  a "Showing: Operational" badge notice with a one-click **Clear filter** link back to the unfiltered
+  list, shown only when a valid filter is active.
+- **Incidents `open` filter** [`app/Http/Controllers/Admin/IncidentController.php`](app/Http/Controllers/Admin/IncidentController.php):
+  additive `?open=1` restricting the list to `DETECTED`/`ACKNOWLEDGED` — the exact states the
+  dashboard counters count — so the card number equals the filtered list total. An explicit valid
+  `status` filter still takes precedence. [`resources/views/admin/incidents/index.blade.php`](resources/views/admin/incidents/index.blade.php)
+  reflects the scope with an "Open incidents" badge + **Clear filter** link and preserves `open=1`
+  through the filter form.
+- **Consistency tests** — card counts are asserted equal to their destination list totals:
+  [`tests/Feature/Auth/AdminDashboardTest.php`](tests/Feature/Auth/AdminDashboardTest.php) (four cards,
+  exact link + query string, `operational` derived from `status_availability` not `is_active`),
+  [`tests/Feature/Admin/DashboardHealthTest.php`](tests/Feature/Admin/DashboardHealthTest.php)
+  (operational card count == `?status=UP` list total),
+  [`tests/Feature/Incidents/IncidentHttpTest.php`](tests/Feature/Incidents/IncidentHttpTest.php)
+  (severity filter reflected; warning/critical card count == open severity list total),
+  [`tests/Feature/Admin/WebsiteCrudTest.php`](tests/Feature/Admin/WebsiteCrudTest.php) (`?status=UP`
+  filters the query, invalid values whitelisted, active filter shown/removable, works with `per_page`).
+
+### Added / Changed — Phase D: Requirements 24 + 23 — status-pages admin table + internal analytics report
+
+- **Requirement 24 — status-pages admin table.**
+  [`resources/views/admin/status-pages/index.blade.php`](resources/views/admin/status-pages/index.blade.php):
+  the **Slug** column now renders an `x-ui.badge` with the **leading slash** (`/slug`). A **Public** page
+  is a link to the real public route (`route('status.show', $page)`, `target="_blank"` +
+  `rel="noopener noreferrer"`); a Private / Password-Protected page renders a non-link badge (no dead
+  404 destination — same rule as the Websites page). The **Edit** action is now an icon-only
+  `x-ui.button variant="ghost" icon-only` with the `pencil` icon and the accessible label/tooltip
+  **"Edit status page"** (route `admin.status-pages.edit` preserved). A new **Analytics** action
+  (`chart-bar` icon, label/tooltip **"View analytics"**) opens the D2 report. The existing Delete
+  action (modal-gated) is preserved as an icon-only danger button.
+- **Requirement 23 — internal analytics report.**
+  - New admin route **`GET /admin/status-pages/{statusPage}/analytics`** named
+    **`admin.status-pages.analytics`**, registered inside the existing `auth` + `session.timeouts` +
+    `admin` group (never on a public route). `{statusPage}` binds by the model's route key (slug).
+  - [`app/Services/StatusPage/StatusPageAnalytics.php`](app/Services/StatusPage/StatusPageAnalytics.php)
+    — all aggregation (controllers/Blade orchestrate/present only). Metrics are derived **only** from
+    persisted `checks` and `incidents`; nothing is fabricated.
+    - **Overall + per-website uptime** — **sample-based**: `checks with availability_state = 'UP'`
+      ÷ `checks with a non-null availability_state`, over the period. Explicitly *not* a time-weighted
+      uptime (no such metric is stored); when the denominator is zero the metric is
+      **"insufficient data"**, never a fabricated 0%.
+    - **Incident counts** — total, open, by severity, by status, by type; **frequency** (per day /
+      per week); a per-day incident series.
+    - **Historical availability** — per-day % of UP checks (days with no checks are omitted).
+    - **Response-time trend** — from `checks.duration_ms` (per-day average + overall average); shown
+      only when timed checks exist, otherwise an explicit "unavailable" state.
+  - **Reporting periods** — `?period=24h|7d|30d|90d` (default `7d`), validated against an allowlist
+    (`StatusPageAnalytics::resolvePeriod`); unknown values fall back to the default. Boundaries are UTC
+    (`Carbon::now('UTC')`). The **90-day** period renders a warning that check telemetry is retained
+    only `retention.checks_days` (default 30) days, so the checks-based series is shorter than the
+    period while incident metrics use the full window (incidents retained 365 days).
+  - [`resources/views/admin/status-pages/analytics.blade.php`](resources/views/admin/status-pages/analytics.blade.php)
+    — summary cards, incident breakdown cards, charts, and a per-website uptime table, using the
+    existing admin layout / `x-ui.card` / `x-ui.badge` / `x-ui.table` / `x-ui.empty-state` primitives
+    and a link back to the status-pages list.
+- **`x-ui.chart`** ([`resources/views/components/ui/chart.blade.php`](resources/views/components/ui/chart.blade.php))
+  — new reusable **server-rendered inline SVG** chart (bar or line) per **ADR-037** (no JS chart
+  library, no new dependency). Responsive via `viewBox` + `preserveAspectRatio` + `w-full max-w-full`
+  (cannot push the page into overflow); theme-aware via `currentColor` + semantic tokens; accessible
+  via `role="img"` + `<title>`/`aria-label` **and** a visible fallback `<table>` of the underlying
+  numbers. An empty series renders an explicit empty state — never a placeholder series.
+
+### Tests
+
+- [`tests/Feature/StatusPage/StatusPageAdminIndexTest.php`](tests/Feature/StatusPage/StatusPageAdminIndexTest.php)
+  — slug badge leading slash + real route + `target="_blank"`/`rel`, non-link for non-public pages,
+  pencil edit icon + label, chart-bar analytics icon + label, preserved modal-gated delete, authz.
+- [`tests/Feature/StatusPage/StatusPageAnalyticsHttpTest.php`](tests/Feature/StatusPage/StatusPageAnalyticsHttpTest.php)
+  — authorized report values from seeded data, allowlisted/unknown period handling, 90-day retention
+  note, guest/non-admin denial, and that public status routes (HTML + JSON) never expose analytics.
+- [`tests/Feature/StatusPage/StatusPageAnalyticsServiceTest.php`](tests/Feature/StatusPage/StatusPageAnalyticsServiceTest.php)
+  — sample-based overall/per-website uptime, period exclusion, incident counts/frequency/series,
+  response-time series, cross-page isolation, and the explicit "insufficient data" contract.
+- [`tests/Feature/Ui/ChartComponentTest.php`](tests/Feature/Ui/ChartComponentTest.php) — SVG renders
+  with `<title>`/responsive attributes + fallback table; line vs bar; empty series → empty state.
+
+### Notes
+
+- No new Composer/npm dependency (ADR-037). No new ADR: this is an application of ADR-037 (SVG charts,
+  no fabricated data) and ADR-016 (retention) — no deviation to record.
+- Analytics is admin-only and never rendered on any public status route; no sensitive data (rule ids,
+  domains, redirect targets, IPs) is displayed.
+
+### Added / Changed — Phase E: Requirements 25 + 26 — public status-page auto-refresh + local-time footer
+
+- **Requirement 26 — precise local-time footer (ADR-040).**
+  [`PublicStatusDTO`](app/Services/StatusPage/PublicStatusDTO.php) gains an allowlisted
+  `updatedAt` UTC ISO-8601 field (4th key), populated in
+  [`StatusProjector::project()`](app/Services/StatusPage/StatusProjector.php) from the **projection
+  generation stamp** `$now` — the same instant that produces `updatedDayBucket` (STATUS-PAGE.md
+  §8.1). Sub-day precision genuinely exists: `$now` is the projection time, not merely a day bucket.
+  The footer in [`resources/views/status/show.blade.php`](resources/views/status/show.blade.php) now
+  renders a `<time datetime="…UTC ISO…">` with a server-rendered fallback
+  (`Last update: YYYY-MM-DD (day-level, UTC)`); the new `statusLocalTime` Alpine component
+  ([`resources/js/app.js`](resources/js/app.js)) renders `Last update: H:i dd/mm/yyyy` in the
+  visitor's local timezone via `Intl.DateTimeFormat`, and never shows `Invalid Date`.
+- **Requirement 25 — auto-refresh control (ADR-039).** The new `statusRefresh` Alpine component
+  adds an accessible enable/disable toggle, an interval dropdown (**1 / 5 / 10 / 30 / 60 minutes,
+  default 1** — see the ADR-039 amendment), and a drift-free `mm:ss` countdown computed from a
+  target timestamp. A refresh `fetch`es the **existing** `status.json` route (same visibility gate,
+  same public DTO — no new endpoint, no probe, no job), re-renders the banner/service region in
+  place, and updates the footer `<time>`. Requests never overlap (in-flight guard); the timer pauses
+  on `document.visibilityState === 'hidden'` and resumes on return; timers + the `visibilitychange`
+  listener are removed in the component's `destroy()` hook. Toggle + interval persist in
+  `localStorage` (`sentinel.status.refresh`). Without JS the server-rendered page is complete and
+  the control markup is valid (options rendered server-side).
+
+### Tests
+
+- [`tests/Feature/StatusPage/LocalTimeFooterTest.php`](tests/Feature/StatusPage/LocalTimeFooterTest.php)
+  — `<time>` element with UTC `datetime`, JS-less fallback, `statusLocalTime` binding, JSON stamp.
+- [`tests/Feature/StatusPage/CacheTest.php`](tests/Feature/StatusPage/CacheTest.php) — the precise
+  stamp is the projection generation time and survives the cache round trip.
+- [`tests/Feature/Ui/StatusAutoRefreshJsTest.php`](tests/Feature/Ui/StatusAutoRefreshJsTest.php) —
+  the `statusRefresh`/`statusLocalTime` components are registered in `app.js` with lifecycle hooks
+  (non-overlap, visibility, timers, persistence) and the view binds them by name, not inline.
+- [`tests/Feature/StatusPage/EnumerationTest.php`](tests/Feature/StatusPage/EnumerationTest.php) —
+  DTO allowlist extended to the four keys; [`RedactionRegressionTest`](tests/Feature/StatusPage/RedactionRegressionTest.php)
+  still passes unchanged.
+
+### Docs
+
+- [`STATUS-PAGE.md`](STATUS-PAGE.md) §8.2 — implemented mechanism + default interval 1 minute;
+  [`DECISIONS.md`](DECISIONS.md) ADR-039 — amendment recording the 1-minute default (Requirement 25
+  precedence per [`AGENTS.md`](AGENTS.md) §18.2).
+
+### Changed — Phase F: Requirement 27 — sidebar collapse toggle relocated to the sidebar footer
+
+- **Relocated the collapse/expand control** out of the admin top header and pinned it to the **bottom
+  of the sidebar** ([`resources/views/components/admin-sidebar.blade.php`](resources/views/components/admin-sidebar.blade.php)).
+  The control is a non-scrolling footer sibling of the scrollable nav (`min-h-0 flex-1 overflow-y-auto`),
+  so it can never overlap nav items, and it renders once per sidebar copy (desktop rail + mobile
+  drawer) — never in the header. The mobile off-canvas drawer keeps its own dedicated close control.
+- **Unchanged state.** Only the button moved: the `sidebar` Alpine component
+  (`resources/js/app.js`), its `collapsed` property, the `toggleCollapse()` method, the state-aware
+  `collapseLabel()` accessible name, and the `localStorage['sentinel.sidebar']` persistence are
+  untouched. The relocated `<button type="button" data-sidebar-collapse>` keeps `aria-expanded`,
+  `aria-controls="admin-sidebar"`, `aria-label`/`title`, and a full-width (`w-full`) hit area; the
+  expanded/collapsed chevrons carry `data-collapse-icon` hooks. The admin top bar retains its
+  remaining controls (mobile drawer toggle, theme switcher, notification bell, profile menu).
+- **Tests.** [`tests/Feature/Ui/AdminSidebarTest.php`](tests/Feature/Ui/AdminSidebarTest.php) asserts the
+  toggle lives at the sidebar bottom (full-width, `aria-expanded`/`aria-controls`, state-aware label,
+  both chevron hooks), is **no longer in the header** (`data-sidebar-collapse`/`toggleCollapse()` absent
+  from `<header>`; exactly two copies on the page), and that the `sidebar` component + persistence remain
+  registered in `app.js`.
+
+### Changed — Phase B: Requirement 21 — Websites page improvements
+
+- **Websites list — enable/disable clarity (B1).** The row toggle now shows the *action to take* with
+  distinct glyphs and semantic tints: **`pause-circle`** + `text-danger`/`bg-danger-muted` to disable a
+  running site, **`play-circle`** + `text-success`/`bg-success-muted` to enable a paused one. `title` +
+  `aria-label` read `Disable monitoring` / `Enable monitoring`. The existing CSRF-protected POST form and
+  its confirmation/error surfaces are unchanged. [`resources/views/admin/websites/index.blade.php`](resources/views/admin/websites/index.blade.php).
+- **Websites list — URL column (B2).** The URL is now a real `<a>` with `target="_blank"` +
+  `rel="noopener noreferrer"`, link styling (`text-info underline-offset-2 hover:underline`), a
+  `max-w-[16rem] truncate` cell so long URLs never push the page wide, and a `title` carrying the full URL.
+  The `href` is gated by the new [`Website::safeUrl()`](app/Models/Website.php) (http/https only), which
+  falls back to plain text for any other scheme.
+- **Websites list — status page association column (B3).** New **Status page** column: `Not linked`
+  (`x-ui.badge variant="neutral"`) when unassigned; the status page **slug** as a linked badge when the
+  page is **Public** (link resolved through `route('status.show', $page)`, `target="_blank"` +
+  `rel="noopener noreferrer"`); a non-link neutral badge (slug only) when the page is Private or
+  Password Protected, so no dead/404 destination is offered. The relation is eager-loaded via
+  `Website::with('statusPage')` in [`WebsiteController@index`](app/Http/Controllers/Admin/WebsiteController.php) (no N+1).
+- **Websites table (B4).** Column count/`table-empty` `colspan` updated; overflow stays contained by the
+  existing `x-ui.table` `overflow-x-auto` wrapper. Search/per-page/pagination untouched.
+
+### Tests
+
+- [`tests/Feature/Admin/WebsiteActionsTest.php`](tests/Feature/Admin/WebsiteActionsTest.php) — distinct
+  icons/tints/labels, safe new-tab URL anchor, status-page column (`Not linked`, linked Public page via the
+  real route, non-link for a Private page) and an N+1 assertion (`status_pages` queried exactly once).
+- [`tests/Feature/Admin/WebsiteCrudTest.php`](tests/Feature/Admin/WebsiteCrudTest.php) — the new column is
+  present and the row toggle remains a CSRF-protected POST form.
+- Tests: `tests/Feature/AdminNotifications/*` (schema, model, dedupe, ownership) and
+  `tests/Feature/Ui/IconComponentTest.php`.
+
+### Docs
+
+- [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15 (in-app centre: event catalogue reuse, dedupe, ownership,
+  independence from outbound delivery); [`STATUS-PAGE.md`](STATUS-PAGE.md) §8.1/§8.2 (precise
+  timestamp + auto-refresh); [`ARCHITECTURE.md`](ARCHITECTURE.md) §14.3/§14.4;
+  [`PRD.md`](PRD.md) `FR-110`–`FR-113`.
+
+### Notes
+
+- No new Composer/npm dependency. Existing views are **not** migrated to `x-ui.icon` in this phase.
+- No fabricated/historical data is displayed anywhere; routine checks do not generate in-app
+  notifications.
+
+### Changed - Phase C: Requirement 22 - dismissible flash messages
+
+- **`x-ui.alert` gains an opt-in dismissible mode** ([`resources/views/components/ui/alert.blade.php`](resources/views/components/ui/alert.blade.php)):
+  new `dismissible` (default `false`) and `dismissLabel` (default `Dismiss notification`) props. When
+  enabled, the alert root carries `x-data="flashMessage"` + `x-show="visible"` + `x-transition` +
+  `x-cloak` and renders a real `<button type="button">` close control (`x-on:click.stop="dismiss()"`,
+  `aria-label`/`title` = dismiss label, `hover:bg-surface-hover` + `focus-visible:ring-focus`, an
+  `x-mark` icon). **Backward compatible:** existing non-dismissible usages render exactly as before
+  (no close button, no Alpine hooks).
+- **`Alpine.data('flashMessage', ...)`** registered in [`resources/js/app.js`](resources/js/app.js) -
+  owns a single `visible` boolean; no auto-dismiss timer. Kept isolated just before `Alpine.start()`
+  so the later Phase F `app.js` edit merges cleanly.
+- **Opt-in at the success-flash call sites only** (login/password-reset `status`, profile, websites,
+  incidents, settings, status-pages, status-settings, notification channels). Success / info / warning
+  flashes are dismissible; **danger** alerts - including every `$errors->any()` validation summary and
+  `@error` message - stay persistent so an unresolved error cannot be dismissed (see `ADR-041`).
+- **No central flash region added** - flash is still rendered per view; no message is double-rendered.
+
+### Tests - Phase C
+
+- [`tests/Feature/Ui/UiPrimitivesTest.php`](tests/Feature/Ui/UiPrimitivesTest.php) - persistent-by-default
+  regression, dismissible close button (`aria-label`, `type="button"`, `x-on:click.stop`, semantic
+  hover/focus tokens, `x-data`/`x-show`/`x-cloak`) and the custom dismiss label.
+- [`tests/Feature/Ui/SharedComponentsTest.php`](tests/Feature/Ui/SharedComponentsTest.php) - asserts the
+  `flashMessage` component is registered in `app.js` (not inline).
+- [`tests/Feature/Ui/AdminDarkModeMigrationTest.php`](tests/Feature/Ui/AdminDarkModeMigrationTest.php) -
+  the rendered success flash carries the dismissible markup.
+
 ## [2026-10-04] — KR still missing from the status page: website CRUD never invalidated the projection (Phase 3/11)
 
 ### Fixed

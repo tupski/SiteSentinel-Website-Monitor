@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\AdminNotificationController;
 use App\Http\Controllers\Admin\DocumentationController;
 use App\Http\Controllers\Admin\IncidentController;
 use App\Http\Controllers\Admin\NotificationChannelController;
@@ -100,6 +101,14 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
 
     // Phase 11 (ADR-031): multi-page CRUD. Delete is guarded in the controller
     // (never the last/default page; websites fall back via ON DELETE SET NULL).
+    //
+    // Requirement 23: internal analytics report. Admin-only (this group) and
+    // never exposed on the public status routes. `{statusPage}` is bound by the
+    // model's route key (slug) — registered before the resource so the literal
+    // `/analytics` segment can never be read as a resource action.
+    Route::get('status-pages/{statusPage}/analytics', [AdminStatusPageController::class, 'analytics'])
+        ->name('status-pages.analytics');
+
     Route::resource('status-pages', AdminStatusPageController::class)->except(['show']);
 
     // Legacy Phase 8 singleton settings — retained for one release (DATABASE.md
@@ -110,6 +119,21 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
     // Phase 7: in-app operator documentation. Read-only, admin-only via the
     // group's `auth` + `session.timeouts` + `admin` (same gate as every route here).
     Route::get('documentation', [DocumentationController::class, 'index'])->name('documentation');
+
+    // Phase G (ADR-038, NOTIFICATIONS.md §15): in-app admin notification centre
+    // data + mark-read API. Admin-only via the group gate; every action is scoped
+    // to the authenticated admin's own rows (ownership enforced in-controller).
+    // Phase H builds the bell/dropdown against these. Literal `read-all` /
+    // `unread-count` paths are registered before the `{adminNotification}` route
+    // so they can never be read as an id.
+    Route::get('notifications/in-app', [AdminNotificationController::class, 'index'])->name('notifications.in-app.index');
+    Route::get('notifications/in-app/unread-count', [AdminNotificationController::class, 'unreadCount'])->name('notifications.in-app.unread-count');
+    // Phase H: full-page, server-rendered in-app centre (distinct from the
+    // outbound-channel `admin.notifications.index`). Literal `page` is
+    // registered before `{adminNotification}` so it can never be read as an id.
+    Route::get('notifications/in-app/page', [AdminNotificationController::class, 'page'])->name('notifications.in-app.page');
+    Route::post('notifications/in-app/read-all', [AdminNotificationController::class, 'markAllRead'])->name('notifications.read-all');
+    Route::post('notifications/in-app/{adminNotification}/read', [AdminNotificationController::class, 'markRead'])->name('notifications.read');
 });
 
 // Public status pages (Phase 8 → Phase 11, ADR-031). Same gate for HTML + JSON.

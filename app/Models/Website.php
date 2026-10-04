@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Services\Security\SsrfUrlValidator;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -127,6 +128,23 @@ final class Website extends Model
     public function effectiveStatusPage(): StatusPage
     {
         return $this->statusPage ?? StatusPage::resolveDefault();
+    }
+
+    /**
+     * The stored URL, but only when its scheme is http/https.
+     *
+     * `url` is normalised at write time by {@see SsrfUrlValidator}
+     * (scheme allowlist, credentials rejected), so this is a defence-in-depth
+     * guard for the admin table's outbound anchor — never blindly trust a stored
+     * value in `href`. Returns null when the scheme is not a safe web scheme, so
+     * the view can fall back to plain text.
+     */
+    public function safeUrl(): ?string
+    {
+        $url = (string) $this->url;
+        $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+        return in_array($scheme, ['http', 'https'], true) ? $url : null;
     }
 
     /**

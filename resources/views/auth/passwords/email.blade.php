@@ -9,7 +9,7 @@
             </p>
 
             @if (session('status'))
-                <x-ui.alert variant="success" class="mt-4">
+                <x-ui.alert variant="success" class="mt-4" :dismissible="true">
                     {{ session('status') }}
                 </x-ui.alert>
             @endif

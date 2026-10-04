@@ -15,6 +15,7 @@ use App\Models\NotificationChannel;
 use App\Models\NotificationLog;
 use App\Services\Audit\AuditEvent;
 use App\Services\Audit\AuditLogger;
+use App\Services\Notifications\AdminNotificationService;
 use App\Services\Notifications\MessageRedactor;
 use App\Services\Notifications\NotificationDispatcher;
 use App\Services\Notifications\NotificationProviderRegistry;
@@ -37,6 +38,7 @@ final class NotificationChannelController extends Controller
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly NotificationProviderRegistry $registry,
+        private readonly AdminNotificationService $adminNotifications,
     ) {}
 
     public function index(): View
@@ -98,6 +100,14 @@ final class NotificationChannelController extends Controller
             'name' => $channel->name,
         ]);
 
+        $this->adminNotifications->recordNotificationConfigChanged(
+            'channel_created',
+            'Notification channel “'.$channel->name.'” was created.',
+            null,
+            (int) $channel->id,
+            $request->user()?->getKey(),
+        );
+
         return redirect()
             ->route('admin.notifications.index')
             ->with('status', __('Channel created.'));
@@ -151,6 +161,14 @@ final class NotificationChannelController extends Controller
             ]);
         }
 
+        $this->adminNotifications->recordNotificationConfigChanged(
+            'channel_updated',
+            'Notification channel “'.$channel->name.'” was updated.',
+            null,
+            (int) $channel->id,
+            $request->user()?->getKey(),
+        );
+
         return redirect()
             ->route('admin.notifications.index')
             ->with('status', __('Channel updated.'));
@@ -163,7 +181,17 @@ final class NotificationChannelController extends Controller
             'name' => $channel->name,
         ]);
 
+        $channelName = $channel->name;
+        $channelId = (int) $channel->id;
         $channel->delete();
+
+        $this->adminNotifications->recordNotificationConfigChanged(
+            'channel_deleted',
+            'Notification channel “'.$channelName.'” was deleted.',
+            null,
+            $channelId,
+            $request->user()?->getKey(),
+        );
 
         return redirect()
             ->route('admin.notifications.index')
@@ -214,6 +242,14 @@ final class NotificationChannelController extends Controller
             'ok' => $result->ok,
             'error_code' => $result->error_code,
         ]);
+
+        $this->adminNotifications->recordNotificationConfigChanged(
+            'channel_tested',
+            'Notification channel “'.$channel->name.'” was tested: '.($result->ok ? 'succeeded' : 'failed').'.',
+            null,
+            (int) $channel->id,
+            $request->user()?->getKey(),
+        );
 
         return back()->with('status', $result->ok
             ? __('Test notification sent.')

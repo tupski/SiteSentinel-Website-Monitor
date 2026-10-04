@@ -175,4 +175,64 @@ final class IncidentHttpTest extends TestCase
         $this->assertFalse($rows->contains('id', $critical->id));
         $this->assertFalse($rows->contains('id', $warning->id));
     }
+
+    /** Requirement 31: the active severity filter is reflected in the form. */
+    public function test_severity_filter_is_reflected_in_the_form(): void
+    {
+        $this->actingAs($this->admin());
+
+        $response = $this->get(route('admin.incidents.index', ['severity' => 'WARNING']));
+
+        $response->assertOk();
+        $response->assertSee('value="WARNING" selected', false);
+    }
+
+    /**
+     * Requirement 31: the dashboard "Warning" / "Critical" cards deep-link with
+     * `?severity=…&open=1`. The card count must equal the filtered list total.
+     */
+    public function test_card_count_matches_the_open_severity_filtered_list_total(): void
+    {
+        // 2 open WARNING, 1 resolved WARNING (must not count), 1 open CRITICAL.
+        $this->makeIncident(['severity' => 'WARNING']);
+        $this->makeIncident(['severity' => 'WARNING', 'dedupe_key' => 'w2-'.$this->website->id]);
+        $this->makeIncident(['severity' => 'WARNING', 'status' => 'RESOLVED', 'resolution_mode' => 'manual', 'dedupe_key' => 'w3-'.$this->website->id]);
+        $this->makeIncident(['severity' => 'CRITICAL', 'dedupe_key' => 'c1-'.$this->website->id]);
+
+        $this->actingAs($this->admin());
+
+        // Card counts.
+        $dashboard = (string) $this->get(route('admin.dashboard'))->assertOk()->getContent();
+        $this->assertStringContainsString('data-dashboard-card="warning"', $dashboard);
+        $this->assertStringContainsString('data-dashboard-card="critical"', $dashboard);
+
+        // Warning list total (open only) === 2.
+        $warning = $this->get(route('admin.incidents.index', ['severity' => 'WARNING', 'open' => 1]));
+        $warning->assertOk();
+        $this->assertSame(2, $warning->getOriginalContent()->getData()['incidents']->total());
+
+        // Critical list total (open only) === 1.
+        $critical = $this->get(route('admin.incidents.index', ['severity' => 'CRITICAL', 'open' => 1]));
+        $critical->assertOk();
+        $this->assertSame(1, $critical->getOriginalContent()->getData()['incidents']->total());
+
+        // Without `open=1`, the resolved WARNING joins the list (3 total) — proving
+        // the card scope is what keeps card and list in agreement.
+        $all = $this->get(route('admin.incidents.index', ['severity' => 'WARNING']));
+        $this->assertSame(3, $all->getOriginalContent()->getData()['incidents']->total());
+    }
+
+    /** Requirement 31: `open=1` is reflected in the list UI with a clear link. */
+    public function test_open_scope_is_shown_and_removable(): void
+    {
+        $this->makeIncident(['severity' => 'WARNING']);
+
+        $this->actingAs($this->admin());
+
+        $response = $this->get(route('admin.incidents.index', ['severity' => 'WARNING', 'open' => 1]));
+
+        $response->assertOk();
+        $response->assertSee('Open incidents');
+        $response->assertSee('Clear filter');
+    }
 }

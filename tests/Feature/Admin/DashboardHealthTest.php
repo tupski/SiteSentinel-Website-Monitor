@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Admin;
 
 use App\Models\User;
+use App\Models\Website;
 use App\Services\Health\SystemHealth;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -97,5 +98,32 @@ final class DashboardHealthTest extends TestCase
         if ($appKey !== '') {
             $this->assertStringNotContainsString($appKey, $html, 'dashboard must never echo APP_KEY');
         }
+    }
+
+    /**
+     * Requirement 31 (I4): the dashboard "Operational" card count must equal the
+     * total of the filtered websites list it links to (`?status=UP`).
+     */
+    public function test_operational_card_count_matches_the_filtered_websites_list_total(): void
+    {
+        Website::factory()->create(['status_availability' => 'UP']);
+        Website::factory()->create(['status_availability' => 'UP']);
+        Website::factory()->create(['status_availability' => 'DOWN']);
+        Website::factory()->create(['status_availability' => null]);
+
+        $admin = $this->admin();
+
+        $dashboard = $this->actingAs($admin)->get(route('admin.dashboard'))->assertOk();
+        $dashboard->assertSeeInOrder(['Operational', '2'], false);
+
+        $list = $this->actingAs($admin)
+            ->get(route('admin.websites.index', ['status' => 'UP']))
+            ->assertOk();
+
+        $this->assertSame(
+            2,
+            $list->getOriginalContent()->getData()['websites']->total(),
+            'the operational card count must equal the filtered list total',
+        );
     }
 }

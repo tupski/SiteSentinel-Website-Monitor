@@ -960,4 +960,141 @@ Circuit re-enable: `CircuitBreaker` disables channel (`enabled=0`) after 5 perma
 
 429 handling: Telegram 429 returns `retry_after`; `SendNotification` honors it as delay, else backoff schedule. Per-chat Redis lock (`telegram:chat:{id}`, 30s) serializes bursts. Repeated 429s consume budget and may trip circuit — widen cooldown or split chats.
 
+---
+
+## 15. In-app admin notification centre (Phase A, ADR-038)
+
+### 15.1 Purpose and boundary
+
+The admin area carries an **in-app notification centre** — a bell with an unread count and a
+read/unread list — backed by the `admin_notifications` table ([`DATABASE.md`](DATABASE.md) §3.24). It
+**extends the existing notification infrastructure**; it is **not** a parallel system. Specifically:
+
+- It is **not a provider** and never fans out through the dispatcher ([`ARCHITECTURE.md`](ARCHITECTURE.md)
+  §3, §8). It does not run on the `notifications` queue and does not touch `notification_logs`.
+- It is **independent from outbound delivery**: enabling/disabling a channel, cooldown suppression,
+  the circuit breaker, retry/backoff, and `notification_logs` statuses (§9) have **no** effect on
+  whether an in-app row is written, and vice versa. An event can appear in-app with **no** outbound
+  channel configured, and an outbound send can be suppressed by cooldown while the in-app row is
+  still written.
+- It **reuses the existing event catalogue** (§4) — the in-app centre does not invent a second event
+  taxonomy.
+
+### 15.2 Event catalogue reuse — which events generate in-app notifications
+
+In-app rows are generated from the **same operational events that are already written to
+`audit_logs`** ([`DATABASE.md`](DATABASE.md) §3.19) — the incident, security, and configuration
+events. The catalogue **reused** is the incident/security/config subset:
+
+| In-app `type` | Generated from | Notes |
+| --- | --- | --- |
+| `incident.down` | availability `DOWN` incident opened | `severity` `danger` |
+| `incident.recovered` | availability `UP`/recovery (incident resolved) | `severity` `success` |
+| `security.incident.detected` | security incident detected | `incident.created` with security type |
+| `security.incident.resolved` | security incident resolved | `incident.resolved` |
+| `monitoring.config.changed` | monitoring configuration changed | e.g. rule/settings change |
+| `notification.config.changed` | notification configuration changed | channel added/edited/toggled |
+
+**Routine checks do NOT notify.** A periodic availability/security check that produces no state
+change (an `UP`/`OK` result, an `INFO` result, a passing content fingerprint) produces **no** in-app
+row — only *degradation*, *recovery*, *confirmed security incident* (detected/resolved), and
+*configuration change* events notify. `INFO` never notifies (it never raises an incident, [`PRD.md`](PRD.md)
+§11.3).
+
+### 15.3 Dedupe rule
+
+`admin_notifications.dedupe_key` is a **nullable string with a UNIQUE index**
+(`uq_admin_notifications_dedupe_key`). Generation is **idempotent**: a retried or repeated
+generation path with the same key does not create a second row (the caller uses a
+`firstOrCreate`-style path, ADR-038). The dedupe key is **per admin** and derived from the source
+event (e.g. the incident id + event kind), so the same event never double-notifies one admin across
+retries. Keys are consistently prefixed/normalised so different event kinds cannot collide.
+
+### 15.4 Read/unread, ownership, and link safety
+
+- **Read/unread** is `read_at` (a NULL timestamp means unread); `markAsRead()` stamps it. The hot
+  unread-count/list query is served by `idx_admin_notifications_user_read_created`
+  (`user_id`,`read_at`,`created_at`).
+- **Ownership scoping** is strict: every row has exactly one `user_id`; the centre only ever reads the
+  **authenticated admin's** rows, and the FK is `ON DELETE CASCADE`, so an admin's rows are removed
+  with the admin.
+- **Link safety**: `link_url` is an **internal relative path only** — validated as relative at write
+  time and never an absolute external URL — so the centre cannot be used as an open redirect.
+
+### 15.5 Relationship to outbound notification logging
+
+`notification_logs` (§9) records **delivery attempts per channel**; `admin_notifications` records
+**per-admin in-app events**. They share the incident/event *source* but nothing else: no shared
+dedupe key namespace, no shared cooldown window, no shared status enum. Admin UI lists delivery
+history from `notification_logs` and in-app history from `admin_notifications`; the two are rendered
+in separate surfaces.
+
+### 15.6 Generation, recipients, dedupe scheme, and the data contract (Phase G)
+
+**Generation.** [`app/Services/Notifications/AdminNotificationService.php`](app/Services/Notifications/AdminNotificationService.php)
+is the single write path. It is **additive** and independent of the dispatcher: it never touches
+`NotificationDispatcher`, `notification_logs`, cooldown, suppression, or the circuit breaker, and it
+never runs on the `notifications` queue. Every write is best-effort (`try/catch` + `report()`): a
+failed in-app write can never break a monitoring job or an admin request.
+
+**Recipients.** Because incident/security events are **system-generated** (the queue worker, not a
+human actor), there is no acting admin to target; the in-app centre is an operational surface every
+admin should see. In-app notifications are therefore fanned out to **all active admins**
+(`users.role = 'admin' AND users.is_active = true`) in **one query**. Configuration-change events use
+the same rule. Viewers never receive in-app notifications (the centre is behind the `admin` gate).
+
+**Dedupe scheme.** Each real event carries a **stable base key** derived from its source
+(`incident.down:{incidentId}`, `incident.recovered:{incidentId}`,
+`security.incident.detected:{incidentId}`, `security.incident.resolved:{incidentId}`,
+`monitoring.config.changed:{action}:{subjectId}:{unixTs}:a{actorId}`,
+`notification.config.changed:{action}:{subjectId}:{unixTs}:a{actorId}`). The frozen schema has a
+**global** UNIQUE index on `dedupe_key`, so the key is additionally scoped per recipient
+(`{base}:u{userId}`) before storage — otherwise a multi-admin fan-out would collide on the second
+admin. The canonical base key stays exactly as documented above; a repeated/retried generation for
+the same event + admin returns the existing row and never duplicates.
+
+**Event hooks (additive).** `incident.down`/`incident.recovered` are emitted from the incident
+engine after reconciliation (opened/resolved incidents collected during `processCheck`); security
+incidents reuse the same hook (`incident.type = 'security'` → detected/resolved). Manual resolution
+emits from `IncidentController::resolve`. `monitoring.config.changed` is emitted from
+`WebsiteController` create/update/enable/disable/delete/bulk. `notification.config.changed` is
+emitted from `NotificationChannelController` create/update/delete/test and `SystemSettingController`
+settings update. **Routine checks never notify.**
+
+**Data contract (Phase H consumes this).** Admin-only, scoped to the authenticated admin's rows.
+JSON is returned when the request expects JSON; a non-JS form post redirects back with a flash.
+
+- `GET /admin/notifications/in-app` (name `admin.notifications.in-app.index`) →
+  `{ "data": [ { "id", "type", "title", "body", "severity", "link_url", "read_at", "created_at" } ],
+  "unread_count": int, "meta": { "per_page": int, "returned": int, "total": int } }`. `created_at`
+  and `read_at` are UTC ISO-8601. `?per_page=` is clamped to 1..50 (default 10).
+- `GET /admin/notifications/in-app/unread-count` (name `admin.notifications.in-app.unread-count`) →
+  `{ "unread_count": int }` (cheap polling).
+- `POST /admin/notifications/in-app/{adminNotification}/read` (name `admin.notifications.read`) →
+  `{ "ok": true, "message": string, "unread_count": int }`; the row is resolved through the
+  authenticated admin's own relation, so another admin's id yields **404** (no IDOR).
+- `POST /admin/notifications/in-app/read-all` (name `admin.notifications.read-all`) →
+  `{ "ok": true, "message": string, "unread_count": int, "affected": int }`; only the authenticated
+  admin's unread rows are touched.
+
+**Link safety.** `link_url` is an internal relative path only (starts with a single `/`, no
+scheme/host, no `//`, no backslash, no control characters); anything else is dropped to `null` at
+write time, so the centre cannot become an open-redirect surface (§15.4).
+
+**UI (Phase H, Requirement 28).** The bell/dropdown/full-page UI is a thin client over the endpoints
+above; it never generates notifications (generation is backend, ADR-038) and is **not real-time** —
+it polls the cheap `unread-count` endpoint on a fixed interval (non-overlapping, paused while the
+tab is hidden, timer/listener torn down on node teardown). The Alpine components (`notificationCenter`
+for the header bell, `notificationList` for the full page) live in `resources/js/app.js`. Mark-read
+updates the unread count **immediately from the server response**; a failed request surfaces an
+honest error and never claims success. The full page is server-rendered and correct without
+JavaScript and is reached at:
+
+- `GET /admin/notifications/in-app/page` (name `admin.notifications.in-app.page`) — distinct from the
+  outbound-channel `admin.notifications.index` page; filterable by `status` (`all`/`unread`/`read`)
+  and `type` (whitelisted against the frozen event catalogue), paginated with the shared `x-per-page`
+  conventions. It reuses the same per-admin query as the JSON `index` action, so the two never
+  diverge. `link_url` is re-validated as an internal relative path before rendering as an `href`
+  (defence in depth over the write-time guard).
+
 *End of `NOTIFICATIONS.md` — specification only; authoritative for notification delivery mechanics.*

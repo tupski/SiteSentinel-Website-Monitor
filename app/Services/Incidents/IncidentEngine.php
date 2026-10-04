@@ -7,8 +7,10 @@ namespace App\Services\Incidents;
 use App\Models\Check;
 use App\Models\Incident;
 use App\Models\Website;
+use App\Services\Notifications\AdminNotificationService;
 use App\Services\StatusPage\StatusPageCache;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * Incident engine (PLAN.md Phase 6, ARCHITECTURE.md §7).
@@ -32,8 +34,21 @@ final class IncidentEngine
     /** Availability incident severity while the failure persists (PRD §11.3). */
     public const AVAILABILITY_SEVERITY = 'WARNING';
 
+    /**
+     * Incidents opened/resolved during the current `processCheck` pass. Collected
+     * here and emitted as in-app notifications (ADR-038) AFTER reconciliation, so
+     * the additive in-app write can never influence the incident ledger.
+     *
+     * @var list<Incident>
+     */
+    private array $openedIncidents = [];
+
+    /** @var list<Incident> */
+    private array $resolvedIncidents = [];
+
     public function __construct(
         private readonly IncidentStateMachine $stateMachine,
+        private readonly AdminNotificationService $adminNotifications,
     ) {}
 
     /**
@@ -43,15 +58,23 @@ final class IncidentEngine
      */
     public function processCheck(Website $website, Check $check, array $detection): ?Incident
     {
+        $this->openedIncidents = [];
+        $this->resolvedIncidents = [];
+
         $incident = $this->reconcileAvailability($website, $check);
 
         $security = $this->reconcileSecurity($website, $check, $detection);
 
         try {
             StatusPageCache::bust();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             report($e);
         }
+
+        // In-app notification generation is ADDITIVE (ADR-038): it runs after
+        // reconciliation and is fully isolated from the incident ledger and from
+        // outbound delivery (never touches the dispatcher/cooldown/logs).
+        $this->emitInAppNotifications();
 
         return $security ?? $incident;
     }
@@ -212,6 +235,9 @@ final class IncidentEngine
                     $technicalMetadata,
                 );
 
+                // Remember for the additive in-app notification pass (ADR-038).
+                $this->openedIncidents[] = $incident;
+
                 return $incident;
             }
 
@@ -283,7 +309,34 @@ final class IncidentEngine
         // Resolution audit fields set by the state machine; mode stamped there.
         $open->refresh();
 
+        // Remember for the additive in-app notification pass (ADR-038).
+        $this->resolvedIncidents[] = $open;
+
         return $open;
+    }
+
+    /**
+     * Emit in-app notifications for the incidents opened/resolved in this pass.
+     *
+     * Best-effort and additive (ADR-038): failures are reported and never
+     * propagate, and nothing here touches outbound delivery.
+     */
+    private function emitInAppNotifications(): void
+    {
+        try {
+            foreach ($this->openedIncidents as $incident) {
+                $this->adminNotifications->recordIncidentTransition($incident, 'opened');
+            }
+
+            foreach ($this->resolvedIncidents as $incident) {
+                $this->adminNotifications->recordIncidentTransition($incident, 'resolved');
+            }
+        } catch (Throwable $e) {
+            report($e);
+        } finally {
+            $this->openedIncidents = [];
+            $this->resolvedIncidents = [];
+        }
     }
 
     private function availabilityDedupeKey(Website $website): string

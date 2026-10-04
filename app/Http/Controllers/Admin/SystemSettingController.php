@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateSystemSettingsRequest;
 use App\Services\Audit\AuditEvent;
 use App\Services\Audit\AuditLogger;
+use App\Services\Notifications\AdminNotificationService;
 use App\Services\Settings\SettingsRepository;
 use DateTimeZone;
 use Illuminate\Http\RedirectResponse;
@@ -32,6 +33,7 @@ final class SystemSettingController extends Controller
     public function __construct(
         private readonly SettingsRepository $settings,
         private readonly AuditLogger $audit,
+        private readonly AdminNotificationService $adminNotifications,
     ) {}
 
     public function edit(): View
@@ -72,6 +74,14 @@ final class SystemSettingController extends Controller
         $this->audit->log(AuditEvent::SETTINGS_CHANGED, $request->user(), null, [
             'fields' => ['site_name', 'site_description', 'timezone', 'site_logo', 'favicon'],
         ]);
+
+        $this->adminNotifications->recordNotificationConfigChanged(
+            'settings_updated',
+            'System settings were updated.',
+            AdminNotificationService::LINK_SETTINGS,
+            null,
+            $request->user()?->getKey(),
+        );
 
         return redirect()
             ->route('admin.settings.edit')

@@ -9,7 +9,7 @@
     </div>
 
     @if (session('status'))
-        <x-ui.alert variant="success" class="mb-4">{{ session('status') }}</x-ui.alert>
+        <x-ui.alert variant="success" class="mb-4" :dismissible="true">{{ session('status') }}</x-ui.alert>
     @endif
 
     @error('status_page')
@@ -39,20 +39,56 @@
                             <x-ui.badge variant="neutral" class="ml-2">{{ __('Default') }}</x-ui.badge>
                         @endif
                     </td>
-                    <td class="px-4 py-3"><code>{{ e($page->slug) }}</code></td>
+                    <td class="px-4 py-3">
+                        {{-- Requirement 24: the slug badge carries the LEADING SLASH and links to
+                             the real public status route — but only when the page is publicly
+                             reachable. Private / Password Protected pages render a non-link badge
+                             so the admin is never sent to a dead/404 destination (same rule as the
+                             Websites page). Route resolved via `route('status.show', $page)`
+                             (StatusPage::getRouteKeyName() is `slug`), never a hand-built string. --}}
+                        @if ($page->isPublic())
+                            <a href="{{ route('status.show', $page) }}"
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               title="{{ __('Open :name status page', ['name' => $page->name]) }}"
+                               class="inline-flex rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated">
+                                <x-ui.badge variant="info">/{{ $page->slug }}</x-ui.badge>
+                            </a>
+                        @else
+                            <x-ui.badge variant="neutral"
+                                        :title="$page->isPasswordProtected() ? __('Password protected') : __('Private')">/{{ $page->slug }}</x-ui.badge>
+                        @endif
+                    </td>
                     <td class="px-4 py-3">{{ e($page->visibility_mode) }}</td>
                     <td class="px-4 py-3">{{ (int) $page->websites_count }}</td>
                     <td class="px-4 py-3 text-right">
-                        <x-ui.button :href="route('admin.status-pages.edit', $page)" variant="secondary" size="sm"
-                               :aria-label="__('Edit :name', ['name' => $page->name])">{{ __('Edit') }}</x-ui.button>
+                        <div class="flex items-center justify-end gap-1">
+                            {{-- Requirement 24: icon-only row actions with accessible labels
+                                 (ADR-034). Analytics (Requirement 23) opens the internal report. --}}
+                            <x-ui.button :href="route('admin.status-pages.analytics', $page)" variant="ghost" icon-only size="sm"
+                                   :aria-label="__('View analytics')" :title="__('View analytics')">
+                                <x-ui.icon name="chart-bar" />
+                            </x-ui.button>
+
+                            <x-ui.button :href="route('admin.status-pages.edit', $page)" variant="ghost" icon-only size="sm"
+                                   :aria-label="__('Edit status page')" :title="__('Edit status page')">
+                                <x-ui.icon name="pencil" />
+                            </x-ui.button>
+
+                            @unless ($page->is_default)
+                                <x-ui.button type="button"
+                                        x-data
+                                        x-on:click="$dispatch('open-modal', { name: 'delete-status-page-{{ $page->id }}' })"
+                                        variant="ghost" icon-only size="sm"
+                                        class="!text-danger hover:!bg-danger-muted hover:!text-danger"
+                                        :aria-label="__('Delete :name', ['name' => $page->name])"
+                                        :title="__('Delete')">
+                                    <x-ui.icon name="x-mark" />
+                                </x-ui.button>
+                            @endunless
+                        </div>
 
                         @unless ($page->is_default)
-                            <x-ui.button type="button"
-                                    x-data
-                                    x-on:click="$dispatch('open-modal', { name: 'delete-status-page-{{ $page->id }}' })"
-                                    variant="danger" size="sm" class="ml-2"
-                                    :aria-label="__('Delete :name', ['name' => $page->name])">{{ __('Delete') }}</x-ui.button>
-
                             <x-modal name="delete-status-page-{{ $page->id }}" :title="__('Delete status page')">
                                 <p>{{ __('Delete “:name”? Websites assigned to it will fall back to the default page. This cannot be undone.', ['name' => $page->name]) }}</p>
                                 <x-slot name="footer">

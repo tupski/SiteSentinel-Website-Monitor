@@ -1,6 +1,8 @@
 @props([
     'variant' => 'info',
     'title' => null,
+    'dismissible' => false,
+    'dismissLabel' => 'Dismiss notification',
 ])
 
 @php
@@ -14,7 +16,14 @@
     [$bg, $border, $accent] = $variants[$variant] ?? $variants['info'];
 @endphp
 
-<div role="alert" {{ $attributes->merge(['class' => trim("flex items-start gap-3 rounded border px-4 py-3 text-sm {$bg} {$border}")]) }}>
+<div role="alert"
+     @if ($dismissible)
+         x-data="flashMessage"
+         x-show="visible"
+         x-transition
+         x-cloak
+     @endif
+     {{ $attributes->merge(['class' => trim("flex items-start gap-3 rounded border px-4 py-3 text-sm {$bg} {$border}")]) }}>
     <div class="flex-1">
         @if ($title)
             <p class="font-semibold {{ $accent }}">{{ $title }}</p>
@@ -28,4 +37,14 @@
     @isset($actions)
         <div class="shrink-0">{{ $actions }}</div>
     @endisset
+
+    @if ($dismissible)
+        <button type="button"
+                x-on:click.stop="dismiss()"
+                aria-label="{{ $dismissLabel }}"
+                title="{{ $dismissLabel }}"
+                class="shrink-0 rounded-md p-1 text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            <x-ui.icon name="x-mark" class="h-4 w-4" />
+        </button>
+    @endif
 </div>

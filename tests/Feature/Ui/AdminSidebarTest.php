@@ -66,6 +66,21 @@ final class AdminSidebarTest extends TestCase
         return substr($html, $open, $close - $open + 1);
     }
 
+    /**
+     * The admin top header, so "not in the header" assertions cannot leak into
+     * the rest of the page (Requirement 27 relocated the collapse control).
+     */
+    private function headerElement(string $html): string
+    {
+        $start = strpos($html, '<header');
+        $this->assertNotFalse($start, 'expected an admin <header>');
+
+        $end = strpos($html, '</header>', $start);
+        $this->assertNotFalse($end, 'expected a closing </header>');
+
+        return substr($html, $start, $end - $start + strlen('</header>'));
+    }
+
     // --- Navigation items + real routes ------------------------------------
 
     public function test_sidebar_renders_every_real_nav_item_with_its_route(): void
@@ -108,16 +123,50 @@ final class AdminSidebarTest extends TestCase
         }
     }
 
-    // --- Collapse toggle ----------------------------------------------------
+    // --- Collapse toggle (Requirement 27: moved to the sidebar footer) ------
 
-    public function test_collapse_toggle_is_present_with_aria_and_accessible_name(): void
+    public function test_collapse_toggle_lives_at_the_bottom_of_the_sidebar(): void
     {
         $html = $this->html('admin.dashboard');
 
         $trigger = $this->elementWith($html, 'data-sidebar-collapse', 'button');
 
+        // Expanded state: a full-width control labelled "Collapse sidebar".
         $this->assertStringContainsString('aria-expanded', $trigger, 'collapse toggle must expose aria-expanded');
+        $this->assertStringContainsString('aria-controls="admin-sidebar"', $trigger);
         $this->assertStringContainsString('Collapse sidebar', $trigger, 'collapse toggle must have an accessible name');
+        $this->assertStringContainsString('w-full', $trigger, 'the relocated toggle is a full-width sidebar footer control');
+
+        // Collapsed state: a directional double-chevron (expand) with an
+        // accessible label/tooltip. The icons live in the button body, so they
+        // are asserted against the page rather than the opening tag. The
+        // component renders only SVG path data — the direction is marked with
+        // an explicit `data-collapse-icon` hook instead of the icon name.
+        $this->assertStringContainsString('data-collapse-icon="collapse"', $html, 'expanded state shows the collapse (left) chevron');
+        $this->assertStringContainsString('data-collapse-icon="expand"', $html, 'collapsed state shows the expand (right) chevron');
+        $this->assertStringContainsString('collapseLabel()', $trigger, 'the accessible name follows the collapse state');
+    }
+
+    public function test_collapse_toggle_is_no_longer_in_the_admin_header(): void
+    {
+        $html = $this->html('admin.dashboard');
+
+        $header = $this->headerElement($html);
+
+        $this->assertStringNotContainsString('data-sidebar-collapse', $header, 'the collapse control must have left the top header');
+        $this->assertStringNotContainsString('toggleCollapse()', $header, 'the header must not drive the sidebar collapse');
+
+        // Positive control: the header still carries its remaining controls.
+        $this->assertStringContainsString('data-drawer-toggle', $header, 'the mobile drawer toggle stays in the header');
+        $this->assertStringContainsString('x-data="themeMenu"', $header, 'the theme switcher stays in the header');
+
+        // ...and the control now renders once per sidebar copy (desktop rail +
+        // mobile drawer), never in the header.
+        $this->assertSame(
+            2,
+            substr_count($html, 'data-sidebar-collapse'),
+            'the collapse control must render only inside the two sidebar copies'
+        );
     }
 
     public function test_sidebar_component_is_wired_to_a_registered_alpine_component(): void
@@ -127,10 +176,16 @@ final class AdminSidebarTest extends TestCase
         // The state lives in a registered Alpine component, never an inline object.
         $this->assertStringContainsString('x-data="sidebar"', $html, 'the shell must bind the registered `sidebar` component');
 
-        // The component (and its localStorage persistence) is registered in app.js.
+        // The component (and its localStorage persistence) is registered in
+        // app.js. Requirement 27 relocated the button only — the state property
+        // (`collapsed`), the toggle method (`toggleCollapse`) and the storage
+        // key (`sentinel.sidebar`) must be unchanged.
         $js = (string) file_get_contents(resource_path('js/app.js'));
         $this->assertStringContainsString("Alpine.data('sidebar'", $js, 'the `sidebar` component must be registered in app.js');
         $this->assertStringContainsString("localStorage.getItem('sentinel.sidebar')", $js, 'collapse persistence is not wired');
+        $this->assertStringContainsString("localStorage.setItem('sentinel.sidebar'", $js, 'collapse persistence must be written back');
+        $this->assertStringContainsString('toggleCollapse()', $js, 'the sidebar component must keep its toggle method');
+        $this->assertStringContainsString('collapseLabel()', $js, 'the sidebar component must keep its state-aware label');
         $this->assertStringContainsString("Alpine.data('profileMenu'", $js, 'the `profileMenu` component must be registered in app.js');
     }
 

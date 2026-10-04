@@ -82,24 +82,13 @@
 
                     <div class="min-w-0 flex-1"></div>
 
-                    {{-- Collapse toggle — desktop only, placed last before the theme
-                         switcher so it carries no text node of its own. --}}
-                    <button type="button"
-                            data-sidebar-collapse
-                            x-on:click="toggleCollapse()"
-                            x-bind:aria-label="collapseLabel()"
-                            aria-label="{{ __('Collapse sidebar') }}"
-                            aria-controls="admin-sidebar"
-                            aria-expanded="true"
-                            x-bind:aria-expanded="collapsed ? 'false' : 'true'"
-                            title="{{ __('Collapse sidebar') }}"
-                            class="hidden h-9 w-9 items-center justify-center rounded-md text-text-muted hover:bg-surface-hover hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus md:inline-flex">
-                        <svg class="h-5 w-5 transition-transform" x-bind:class="collapsed ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M15 6l-6 6 6 6" />
-                        </svg>
-                    </button>
-
+                    {{-- Requirement 27: the sidebar collapse/expand control moved to
+                         the bottom of the sidebar itself (x-admin-sidebar). --}}
                     <x-theme-switcher />
+
+                    {{-- Requirement 28 (Phase H): in-app notification centre bell,
+                         between the theme switcher and the profile menu. --}}
+                    <x-notification-center />
 
                     <x-profile-dropdown />
                 </div>

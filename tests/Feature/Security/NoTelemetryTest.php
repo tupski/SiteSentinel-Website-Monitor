@@ -103,8 +103,42 @@ final class NoTelemetryTest extends SecurityTestCase
 
     public function test_no_telemetry_routes_are_registered(): void
     {
+        // The needle list targets *third-party* telemetry/analytics surfaces
+        // (a route whose URI names one would mean an outbound phone-home).
+        // A first-party, server-rendered internal report may legitimately have
+        // "analytics" in its URI (Req 23: the admin-only Status Page analytics
+        // report) — it makes no outbound call. Such routes are allowlisted here
+        // ONLY if they remain authenticated admin-only pages, which is asserted
+        // below so the exception can never be widened into a public/telemetry
+        // route.
+        $internalAllowlist = [
+            'admin/status-pages/{statuspage}/analytics',
+        ];
+
+        foreach ($internalAllowlist as $allowedUri) {
+            $allowed = null;
+            foreach (Route::getRoutes() as $route) {
+                if (strtolower($route->uri()) === $allowedUri) {
+                    $allowed = $route;
+                    break;
+                }
+            }
+
+            $this->assertNotNull($allowed, "Allowlisted internal route '{$allowedUri}' is missing.");
+            $this->assertContains(
+                'admin',
+                $allowed->gatherMiddleware(),
+                "Allowlisted route '{$allowedUri}' must stay admin-gated (AC-23).",
+            );
+        }
+
         foreach (Route::getRoutes() as $route) {
             $uri = strtolower($route->uri());
+
+            if (in_array($uri, $internalAllowlist, true)) {
+                continue;
+            }
+
             foreach (['telescope', 'pulse', 'horizon', 'sentry', 'analytics'] as $needle) {
                 $this->assertStringNotContainsString(
                     $needle,

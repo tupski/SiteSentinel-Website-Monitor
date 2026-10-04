@@ -30,7 +30,8 @@
 `check_extractions`, `detection_rules`, `website_rule_settings`, `incidents`, `incident_events`,
 `snapshots`, `notification_channels`, `website_notification_channel`, `notification_logs`,
 `notification_cooldowns`, `status_pages`, `push_subscriptions`, `settings`,
-`status_page_settings`, `audit_logs`, `jobs`, `failed_jobs`, `cache`, `cache_locks`.
+`status_page_settings`, `audit_logs`, `admin_notifications`, `jobs`, `failed_jobs`, `cache`,
+`cache_locks`.
 
 `personal_access_tokens` — **N/A**: SiteSentinel is session-based admin-only (see
 `DECISIONS.md` ADR-018) and does not expose an API at MVP, so no token table is required.
@@ -43,6 +44,7 @@
 erDiagram
     users ||--o{ incidents : acknowledges_resolves
     users ||--o{ audit_logs : acts
+    users ||--o{ admin_notifications : receives
     users ||--o{ sessions : has
 
     websites ||--o{ checks : produces
@@ -608,6 +610,36 @@ in a notification payload ([`SECURITY.md`](SECURITY.md) §4). VAPID keys are **n
 live in `config/sentinel.php` + env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`).
 Payloads are redacted through `MessageRedactor` before send.
 
+### 3.24 `admin_notifications`
+
+Purpose: per-admin in-app notification centre (ADR-038). One row per notifiable event, **persisted
+per admin** and **decoupled from outbound channel delivery** — it is not a provider, does not run on
+the `notifications` queue, and does not participate in `notification_logs` suppression/cooldown. It
+reuses the existing incident/security/config event catalogue (the same events written to
+`audit_logs`) and adds durable read/unread state.
+
+| Column | Type | Null | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `id` | BIGINT UNSIGNED | no | auto | PK |
+| `user_id` | BIGINT UNSIGNED | no | — | FK `users.id`; ownership/admin scope |
+| `type` | VARCHAR(64) | no | — | event type (see [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §15) |
+| `title` | VARCHAR(255) | no | — | short display title |
+| `body` | VARCHAR(500) | yes | NULL | optional short description |
+| `severity` | VARCHAR(16) | yes | NULL | icon/colour hint (`info`/`success`/`warning`/`danger`) |
+| `link_url` | VARCHAR(2048) | yes | NULL | **internal relative path only**; never an absolute external URL |
+| `read_at` | TIMESTAMP | yes | NULL | NULL = unread |
+| `dedupe_key` | VARCHAR(191) | yes | NULL | idempotency key; UNIQUE (multiple NULLs allowed) |
+| `created_at`/`updated_at` | TIMESTAMP | yes | NULL | standard |
+
+Keys/indexes: PK `id`; FK `user_id` -> `users.id` **ON DELETE CASCADE** (an admin's rows die with
+the admin); `uq_admin_notifications_dedupe_key` (`dedupe_key`) for idempotent generation across
+retries; `idx_admin_notifications_user_read_created` (`user_id`,`read_at`,`created_at`) for the hot
+unread-count / list query.
+
+Notes: `link_url` is validated as a **relative internal path** (never an absolute external URL), so
+the centre cannot become an open-redirect surface. The table is **not** in the retention set (§4) —
+it is administrative, not high-volume telemetry, and is pruned only by user deletion (cascade).
+
 ---
 
 ## 4. Retention Strategy
@@ -652,6 +684,8 @@ expected growth (§6).
 | Push subscription lookup | `uq_push_subscriptions_endpoint_hash` (hash of `endpoint`) + `idx_push_subscriptions_enabled` (`enabled`) — Phase 11 dispatch |
 | Status page response band | latest `checks.duration_ms` by `idx_checks_website_started_at` (per published website) |
 | Notification dedupe lookup | `idx_notification_logs_dedupe_key` + `uq_notification_cooldowns_key` |
+| In-app admin notification unread list | `idx_admin_notifications_user_read_created` (`user_id`,`read_at`,`created_at`) — Phase A centre |
+| In-app admin notification dedupe | `uq_admin_notifications_dedupe_key` (`dedupe_key`) — idempotent generation |
 | Retention pruning | `idx_checks_created_at`, `idx_incidents_created_at`, `idx_notification_logs_created_at`, `idx_snapshots_expires_at` |
 
 ---
@@ -707,5 +741,6 @@ Ordering the future agent will follow:
 9. **Phase 11 (additive).** `status_pages`, then add `websites.status_page_id` FK (ON DELETE
    SET NULL), then `push_subscriptions`; migrate the existing `status_page_settings` singleton into
    one default `status_pages` row (data-preserving; never destructive).
+10. **Phase A (additive).** `admin_notifications` (ADR-038) — depends only on `users`.
 
 This ordering respects FK dependencies so every migration can run forward on a clean MySQL 8.
