@@ -6,6 +6,7 @@ namespace Tests\Feature\Auth;
 
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Services\Audit\AuditEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -36,10 +37,10 @@ final class AuditLogTest extends TestCase
 
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $user->getKey(),
-            'event' => 'auth.login',
+            'event' => AuditEvent::AUTH_LOGIN_SUCCESS,
         ]);
 
-        $entry = AuditLog::query()->where('event', 'auth.login')->first();
+        $entry = AuditLog::query()->where('event', AuditEvent::AUTH_LOGIN_SUCCESS)->first();
         $this->assertNotNull($entry->created_at, 'audit entry must carry a timestamp');
         $this->assertSame($user::class, $entry->subject_type);
     }
@@ -56,7 +57,7 @@ final class AuditLogTest extends TestCase
             'password' => 'wrong-password',
         ]);
 
-        $this->assertDatabaseHas('audit_logs', ['event' => 'auth.login_failed']);
+        $this->assertDatabaseHas('audit_logs', ['event' => AuditEvent::AUTH_LOGIN_FAILURE]);
     }
 
     public function test_logout_is_audited(): void
@@ -67,7 +68,7 @@ final class AuditLogTest extends TestCase
 
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $user->getKey(),
-            'event' => 'auth.logout',
+            'event' => AuditEvent::AUTH_LOGOUT,
         ]);
     }
 
@@ -78,7 +79,7 @@ final class AuditLogTest extends TestCase
         $user = User::factory()->create(['email' => 'admin@example.test']);
 
         $this->post('/password-reset', ['email' => 'admin@example.test']);
-        $this->assertDatabaseHas('audit_logs', ['event' => 'auth.password_reset_requested']);
+        $this->assertDatabaseHas('audit_logs', ['event' => AuditEvent::AUTH_PASSWORD_RESET_REQUESTED]);
 
         $token = Str::random(64);
         DB::table('password_reset_tokens')->updateOrInsert(
@@ -95,7 +96,7 @@ final class AuditLogTest extends TestCase
 
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $user->getKey(),
-            'event' => 'auth.password_reset_completed',
+            'event' => AuditEvent::AUTH_PASSWORD_RESET_COMPLETED,
         ]);
     }
 

@@ -9,7 +9,9 @@ use App\Models\Incident;
 use App\Models\NotificationCooldown;
 use App\Models\NotificationLog;
 use App\Models\Snapshot;
+use Illuminate\Console\Scheduling\Event;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schedule;
 
 /**
  * Retention pruning regression suite (PLAN.md Phase 9 AC-9-05 / AC-19).
@@ -175,5 +177,20 @@ final class RetentionPruningTest extends SecurityTestCase
         $this->artisan('model:prune', ['--model' => [Check::class]])->assertExitCode(0);
 
         $this->assertDatabaseHas('checks', ['id' => $survivor->id]);
+    }
+
+    public function test_retention_pruning_is_scheduled_daily(): void
+    {
+        // FR-90: pruning is a scheduled job. `routes/console.php` registers
+        // `Schedule::command('model:prune')->daily()`. Assert it is present and
+        // still running on a daily cadence (not silently removed/mis-timed).
+        $events = Schedule::events($this->app);
+
+        $pruning = collect($events)->first(
+            fn (Event $event): bool => str_contains((string) ($event->command ?? ''), 'model:prune')
+        );
+
+        $this->assertNotNull($pruning, 'model:prune must be registered on the scheduler (AC-19).');
+        $this->assertSame('0 0 * * *', $pruning->getExpression(), 'Retention pruning must run daily (FR-90).');
     }
 }

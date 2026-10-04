@@ -223,14 +223,16 @@
       "expect": {
         "signals": [
           "RULE-RED-001",
+          "RULE-RED-002",
           "RULE-RED-005",
           "RULE-RED-006"
         ],
-        "score": 34,
+        "score": 39,
         "categories": 1,
         "security_state": "SUSPECT",
         "guard_capped": true
-      }
+      },
+      "note": "the blocked hop lands on a different host than the monitored site, so the canonical final-domain rule (RULE-RED-002) co-fires"
     },
     {
       "id": "cnt_001_hash_drift",

@@ -731,6 +731,14 @@ Security-relevant events are written to `audit_logs` (columns: `user_id`, `event
 | `retention.pruned` | A pruning job ran, with counts in `metadata`. |
 | `ssrf.blocked` | A probe hop was blocked by the SSRF policy (§5.6). |
 
+Supplementary events (not part of the security catalogue above, but emitted to `audit_logs` for
+full traceability; they carry no secret): `auth.admin_provisioned` (out-of-band admin provisioning),
+`auth.password_reset_requested_unknown` (reset requested for an unknown email — enumeration-resistant),
+`auth.password_reset_failed` (reset token invalid/expired), `website.created` / `website.updated` /
+`website.deleted` / `website.toggled` (admin website CRUD), `notification.channel_created` /
+`notification.channel_updated` / `notification.channel_deleted` (admin channel management), and
+`notification.channel_disabled` (circuit breaker — see [`NOTIFICATIONS.md`](NOTIFICATIONS.md) §9).
+
 ### 9.2 Where events go, and the separation rule
 
 | Log class | Destination | Retention |
@@ -752,6 +760,12 @@ predictable and keeps security evidence out of deployment-rotated log files that
 - `ip_address` and `user_agent` are recorded for admin actions; these are personal data and must be
   covered by the deployment's privacy posture.
 - Audit records are append-only; the application provides no update/delete path for `audit_logs`.
+- The event strings in §9.1 are the **canonical** names. The application emits them verbatim via
+  `App\Services\Audit\AuditEvent`; a drift guard
+  (`tests/Feature/Security/AuditEventCatalogueTest.php`) fails if the code and this table disagree.
+  `retention.pruned` is emitted by the pruning path (`model:prune`, scheduled daily), which listens
+  to Laravel's `ModelPruningFinished` event and records per-model counts in `metadata.models`
+  (plus a `metadata.total`); it carries no secret and no monitored content.
 
 ---
 
@@ -808,7 +822,7 @@ This satisfies `RULE-SSL-001`'s false-positive consideration in
 | Containers | Run as **non-root**; drop unnecessary Linux capabilities. |
 | Filesystem | **Read-only** root filesystem where practical; writable mounts only for snapshots, logs, and data volumes. |
 | DB user | **Least-privilege** MySQL account: DML on the app schema only, no `SUPER`, no cross-schema access. |
-| Redis | **Auth enabled**; never publicly exposed; bound to the internal container network only. |
+| Redis | **Auth enabled** (`--requirepass` from a secret); never publicly exposed; bound to the internal container network only. Implemented in `docker-compose.prod.yml` (§11.1). |
 | MySQL | **Not publicly exposed**; internal network only; strong credentials from environment. |
 | `APP_DEBUG` | **`false`** in production, always. Debug mode must never render stack traces or config to a browser. |
 | `APP_ENV` | `production` in production. |
@@ -819,6 +833,50 @@ This satisfies `RULE-SSL-001`'s false-positive consideration in
 | Logs | Application logs rotate at the deployment layer; audit and telemetry tables have product-managed retention. |
 | Backups | MySQL and snapshot volumes are backed up together and restore-tested; backups are encrypted at rest. |
 | Updates | Base images and PHP/Laravel patch releases are applied on a defined cadence. |
+
+---
+
+### 11.1 Redis authentication (Phase 9 BLOCKER — code/deployment control)
+
+The Phase 9 audit recorded the absence of Redis authentication as a **production BLOCKER**
+(§12.1 disposition L19). The control is now implemented in the deployment configuration; because
+it is an infrastructure control it is **verified at deploy time, not by the local test suite**.
+
+**Implementation (`docker-compose.prod.yml`, layered on `docker-compose.yml`):**
+
+- Redis starts with `--requirepass "$REDIS_PASSWORD"` where `${REDIS_PASSWORD:?…}` is **fail-closed**:
+  Compose refuses to start the stack if the variable is unset or empty, so a no-auth Redis can never
+  be launched by accident in production.
+- The password is injected **only** from the environment (`.env` / operator secret store); it is
+  never written into `docker-compose.yml`, `docker-compose.prod.yml`, `.env.example`, or any other
+  tracked file. `.env.example` carries a `CHANGE_ME_REDIS_PASSWORD` placeholder only.
+- Redis is on the internal `sitesentinel-network` with `expose:` (not `ports:`), so it has **no
+  published host port** — reachable only by sibling services.
+- The application reads the same value through `REDIS_PASSWORD` → `config/database.php`
+  (`redis.default`) and `config/queue.php` (`redis`) / `config/cache.php` (`redis` connection).
+  `predis` (the configured client) honours it for queue:work, `Cache::lock`, sessions and the
+  status-projection cache.
+- The Redis **healthcheck** authenticates (`redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping`),
+  so it still passes with auth on, and the app's `/health` `checkRedis()` (which uses the same
+  connection) continues to reflect true reachability.
+
+**Credential generation / rotation / recovery:**
+
+- **Generate:** `openssl rand -hex 32` (or `head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'`);
+  store in the operator secret store and inject as `REDIS_PASSWORD`.
+- **Rotate (no data loss):** set the new value in the secret store, then
+  `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d redis` (Redis restarts
+  authenticated with `appendonly` data intact), then restart `app`, `worker`, `scheduler` so they
+  reconnect: `… up -d app worker scheduler`.
+- **Recover:** if the password is lost, it cannot be recovered from Redis (only hashed into
+  memory/config); generate a new one and redeploy as above. To avoid lockout during rotation, apply
+  new Redis first, then app.
+- **Queues are not lost on rotation:** AOF persists job data across the auth restart; in-flight jobs
+  are re-queued by the normal retry/visibility mechanism.
+
+> **Status:** RESOLVED at the configuration level; the remaining action is a **deployment
+> verification** (start the prod stack and confirm `redis-cli` without `-a` is rejected). See §12.1
+> L19.
 
 ---
 
@@ -881,14 +939,14 @@ items; earlier phases must still satisfy their own rows.
 - [~] `X-Content-Type-Options: nosniff` set by Nginx; `Content-Disposition: attachment` on snapshot downloads DEFERRED (no download route at MVP). — Phase 9
 
 ### Audit & transport
-- [ ] `audit_logs` records auth, incidents, rule/settings changes, secret updates, pruning (§9.1). — Phase 9
+- [x] `audit_logs` records auth, incidents, rule/settings changes, secret updates, pruning (§9.1). — Phase 10 (auth/secret/status-page/pruning events verified by `AuditEventCatalogueTest` + `RetentionAuditTest`; the canonical dotted names of §9.1 are enforced by a code↔doc drift guard)
 - [ ] Monitoring telemetry is kept out of the application log stream (§9.2). — Phase 9
 - [ ] TLS 1.2+, HSTS, and the secure header set are configured (§10.1–§10.2). — Phase 9
 - [ ] Outbound TLS verification is on by default; opt-out is recorded and warned (§10.3). — Phase 4
 
 ### Deployment
-- [~] Containers are non-root; root FS read-only where practical (§11). — Phase 9 (DEFERRED — §12.1 L21)
-- [~] DB user is least-privilege; MySQL and Redis are not publicly exposed (§11). — Phase 9 (not-exposed VERIFIED; least-privilege + Redis auth NOT VERIFIED — §12.1 L19/L20)
+- [~] Containers are non-root; root FS read-only where practical (§11). — Phase 10 (fpm pool non-root as `www-data`, `cap_drop`, `no-new-privileges`, read-only fs in `docker-compose.prod.yml`; runtime NOT VERIFIED — §12.1 L21)
+- [~] DB user is least-privilege; MySQL and Redis are not publicly exposed (§11). — Phase 10 (not-exposed VERIFIED; Redis auth implemented in `docker-compose.prod.yml` §11.1, runtime NOT VERIFIED; DB least-privilege grants remain a deployment task — §12.1 L19/L20)
 - [~] `APP_DEBUG=false` in production (§11). — Phase 9 (guidance + compose default; runtime NOT VERIFIED — §12.1 L18)
 - [x] Dependency scanning and a secret-rotation path exist (§11). — Phase 9 (rotation path documented §4.2 rule 7; scheduled dependency scanning remains a deployment/CI responsibility — see §12.1)
 
@@ -929,10 +987,10 @@ exact operational requirement and its verification method are stated.
 | L16 | Secret rotation path (`APP_KEY`, DB, Redis, SMTP, Telegram) (§4.2 rule 7) | Ops | Documented procedure; no automation | DEFERRED | Medium | — | Follow §4.2 rule 7 during planned maintenance | DEFERRED — operational |
 | L17 | HSTS, CSP, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` (§10.1–§10.2) | Nginx/edge | Only `X-Frame-Options: SAMEORIGIN` + `nosniff` in `docker/nginx/default.conf` | NOT VERIFIED / DEFERRED | Medium | — | Add the §10.2 header set at the edge; enable TLS 1.2+ and HTTPS redirect | DEFERRED — operational |
 | L18 | `APP_DEBUG=false`, `APP_ENV=production` in production (§11) | Config | Guidance in `.env.example`; compose defaults `APP_DEBUG=false` | VERIFIED ACCEPTABLE (guidance) / NOT VERIFIED (runtime) | High if misconfigured | `ProductionConfigTest::test_no_debug_or_diagnostic_routes_are_registered` | Assert at deploy; never enable debug in prod | NOT VERIFIED — operational |
-| L19 | Redis authentication (§11) | Deployment | `docker-compose.yml` runs Redis without `requirepass` | BLOCKER (production) | High | — | Enable Redis auth and keep it on the internal network only; set `REDIS_PASSWORD` | BLOCKER — operational |
+| L19 | Redis authentication (§11) | Deployment | `docker-compose.prod.yml` runs Redis with fail-closed `--requirepass` from `REDIS_PASSWORD`; internal-only network | FIXED (config) / NOT VERIFIED (runtime) | High | `docker-compose.prod.yml`; §11.1 | Start the prod stack and confirm `redis-cli` without `-a` is rejected; set `REDIS_PASSWORD` from the secret store | RESOLVED — config control; verify at deploy |
 | L20 | MySQL least-privilege user (§11) | Deployment | Compose creates a non-root app user; privilege set is image default | NOT VERIFIED | Medium | — | Grant DML-only on the app schema; verify no `SUPER`/cross-schema | NOT VERIFIED — operational |
-| L21 | Containers run non-root (§11) | Deployment | `docker/app/Dockerfile` runs as root (no `USER`) | DEFERRED | Medium | — | Add a non-root `USER` and drop capabilities | DEFERRED — operational |
-| L22 | MySQL / Redis not publicly exposed (§11) | Deployment | Compose publishes no ports for either service | VERIFIED ACCEPTABLE | Low | `docker-compose.yml` (only `nginx` publishes 80) | — | VERIFIED ACCEPTABLE |
+| L21 | Containers run non-root (§11) | Deployment | fpm worker pool runs as `www-data` (`docker/app/zz-prod.conf`); prod override adds `cap_drop: [ALL]`, `no-new-privileges`, `read_only` fs, tmpfs | VERIFIED ACCEPTABLE (config) / NOT VERIFIED (runtime) | Medium | `docker-compose.prod.yml`, `docker/app/zz-prod.conf` | fpm master starts as root solely to bind :9000 and drop the pool (documented constraint); a fully rootless master is unsupported by the Alpine `php-fpm` image | VERIFIED ACCEPTABLE — pool non-root |
+| L22 | MySQL / Redis not publicly exposed (§11) | Deployment | Compose publishes no ports for either service; prod override uses `expose:` only | VERIFIED ACCEPTABLE | Low | `docker-compose.yml`, `docker-compose.prod.yml` (only `nginx` publishes 80) | — | VERIFIED ACCEPTABLE |
 | L23 | Health endpoint disclosure (§11) | App | Component status + queue depth only; no secrets | VERIFIED ACCEPTABLE | Low | `HealthEndpointTest` (secret leak checks) | — | VERIFIED ACCEPTABLE |
 | L24 | Login enumeration timing equalisation (§2.4) | Auth | Generic failure message; no artificial delay | VERIFIED ACCEPTABLE | Low | `LoginTest::test_wrong_password_fails_with_generic_message` | — | VERIFIED ACCEPTABLE |
 | L25 | CSRF global exemption in tests (§2.6) | CSRF | Blanket `except: ['/*']` removed; relies on Laravel's built-in test bypass only | FIXED | High (if shipped) | `CsrfSessionTest::test_no_blanket_csrf_exemption_is_registered` | — | FIXED |
@@ -975,11 +1033,17 @@ reversible) and is **not** affected by `APP_KEY` rotation.
 
 ### 12.1.5 Production-readiness limitations (cannot be verified locally)
 
-Reverse-proxy TLS termination and header set (L17), live TLS/certificate chain, production Redis
-auth and locking (L19), MySQL least-privilege grants (L20), non-root containers (L21), egress
-firewall (L2), real secret material and rotation (L16), external SMTP/Telegram delivery, and
-runtime monitoring/alerting are **not** exercised by the local test suite. They are deployment
-requirements, not code claims, and MUST be verified in the target environment before production.
+Reverse-proxy TLS termination and header set (L17), live TLS/certificate chain, MySQL least-privilege
+grants (L20), egress firewall (L2), real secret material and rotation (L16), external SMTP/Telegram
+delivery, and runtime monitoring/alerting are **not** exercised by the local test suite. They are
+deployment requirements, not code claims, and MUST be verified in the target environment before
+production.
+
+Production **Redis authentication** (L19) is now implemented in `docker-compose.prod.yml` (§11.1):
+password injected from `REDIS_PASSWORD`, fail-closed startup, internal-only network, auth-aware
+healthcheck. Because Docker is unavailable in this build environment the Compose file could not be
+exercised locally; the deploy-time verification is to start the prod stack and confirm an
+unauthenticated `redis-cli ping` is rejected while the app's `/health` reports `redis: ok`.
 
 ---
 

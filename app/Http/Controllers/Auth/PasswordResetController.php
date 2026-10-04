@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Mail\PasswordResetMail;
 use App\Models\User;
+use App\Services\Audit\AuditEvent;
 use App\Services\Audit\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -67,7 +68,7 @@ final class PasswordResetController extends Controller
             Mail::to($user->email)
                 ->send(new PasswordResetMail($resetUrl, self::TOKEN_TTL_MINUTES));
 
-            $this->audit->log('auth.password_reset_requested', $user, $user);
+            $this->audit->log(AuditEvent::AUTH_PASSWORD_RESET_REQUESTED, $user, $user);
         } else {
             // Audited without user linkage; still no behavioral difference outside the log.
             $this->audit->log('auth.password_reset_requested_unknown', null, null, [
@@ -129,7 +130,7 @@ final class PasswordResetController extends Controller
         DB::table('sessions')->where('user_id', $user->getKey())->delete();
 
         // Audit with actor + timestamp (AC-2-06)
-        $this->audit->log('auth.password_reset_completed', $user, $user);
+        $this->audit->log(AuditEvent::AUTH_PASSWORD_RESET_COMPLETED, $user, $user);
 
         // Recovery completes a login-equivalent identity proof, but we still
         // require a fresh explicit login (no auto-login surprise).

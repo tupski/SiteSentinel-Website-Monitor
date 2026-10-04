@@ -63,10 +63,15 @@ final class Probe
             $status = $response->getStatusCode();
             $isRedirect = $status >= 300 && $status < 400 && $response->hasHeader('Location');
 
+            // Canonical hop shape (DETECTION-RULES 8.3): every hop records its
+            // status, the from-URL and the to-URL so redirect rules (RULE-RED-005
+            // downgrade, RULE-RED-003 suspicious target) can read the destination.
+            // The final, non-redirect hop has no destination.
             $chain[] = [
                 'url' => $currentUrl,
                 'status' => $status,
                 'is_redirect' => $isRedirect,
+                'to_url' => $isRedirect ? $this->resolveRedirectUrl($currentUrl, (string) $response->header('Location')) : null,
             ];
 
             if ($isRedirect && $website->follow_redirects) {

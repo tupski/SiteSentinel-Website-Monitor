@@ -344,8 +344,24 @@ final class RuleEngine
             }
         }
 
-        $expectedDomain = $website->expected_final_domain ?: ($baseline ? BaselineComparator::domainFromUrl($baseline->final_url) : '');
+        // Canonical expected domain: the explicit override wins, otherwise the
+        // baseline's final URL. When neither is set (first check, no override),
+        // fall back to the monitored website host only if the check actually
+        // redirected to a *different* host - a genuine external redirect - so
+        // RULE-RED-003 can fire without suppressing the documented "unexpected
+        // redirect" (RULE-RED-001) signal for same-host hops such as an
+        // https -> http downgrade. A missing final_url is treated as unchanged.
+        $expectedDomain = $website->expected_final_domain
+            ?: ($baseline ? BaselineComparator::domainFromUrl($baseline->final_url) : '');
+
+        $hostDomain = BaselineComparator::domainFromUrl($website->url);
         $finalDomain = BaselineComparator::domainFromUrl($check->final_url);
+
+        if ($expectedDomain === '' && $finalDomain !== '' && $finalDomain !== $hostDomain) {
+            $expectedDomain = $hostDomain;
+        }
+
+        $finalDomain = $finalDomain ?: $expectedDomain;
 
         $baselineHops = 0;
         if ($baseline !== null && is_array($baseline->external_domains)) {

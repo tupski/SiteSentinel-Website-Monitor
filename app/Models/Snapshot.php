@@ -81,17 +81,43 @@ final class Snapshot extends Model
     }
 
     /**
-     * Retention: prune evidence snapshots older than `retention.snapshots_days`
-     * (PRD §16, AC-19). Open-incident evidence is preserved until its incident
-     * is resolved; the model's own `expires_at` is the canonical window.
+     * Retention: prune evidence snapshots whose own `expires_at` has passed
+     * (DATABASE.md §4: "14d (also honors `expires_at`)").
+     *
+     * `expires_at` is the canonical window: `SnapshotWriter` stamps it as
+     * `captured_at + retention.snapshots_days`, so the TTL is set at capture
+     * time and is exactly configurable. A `created_at` age fallback is retained
+     * only for rows with a NULL `expires_at` (legacy / manually inserted rows),
+     * so a snapshot can never become immortal by omission.
+     *
+     * Open-incident evidence is preserved until its incident is RESOLVED
+     * (PRD §16.3, FR-95): a snapshot referenced by an open incident is never
+     * pruned out from under it, and becomes prunable once the incident is
+     * resolved (`snapshots.incident_id` is ON DELETE SET NULL, DATABASE.md §7).
      *
      * @return Builder<static>
      */
     public function prunable(): Builder
     {
-        return self::query()->where('created_at', '<=', now()->subDays(
+        $fallbackCutoff = now()->subDays(
             max(1, (int) config('sentinel.retention.snapshots_days', 14))
-        ));
+        );
+
+        return self::query()
+            ->where(function (Builder $query) use ($fallbackCutoff): void {
+                $query->where('expires_at', '<=', now())
+                    ->orWhere(function (Builder $query) use ($fallbackCutoff): void {
+                        $query->whereNull('expires_at')
+                            ->where('created_at', '<=', $fallbackCutoff);
+                    });
+            })
+            // Never prune evidence an open incident still depends on.
+            ->where(function (Builder $query): void {
+                $query->whereNull('incident_id')
+                    ->orWhereHas('incident', function (Builder $query): void {
+                        $query->where('status', 'RESOLVED');
+                    });
+            });
     }
 
     /**

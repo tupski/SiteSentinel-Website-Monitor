@@ -1,0 +1,265 @@
+# SiteSentinel — production override (SECURITY.md §11).
+#
+# Used ONLY layered on top of the base file (single source of topology — no
+# duplicated service definitions):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Justification: the base file already defines the correct 6-service topology
+# (nginx/app/scheduler/worker/mysql/redis), network and volumes. Duplicating that
+# in a second standalone "prod" file would create two conflicting sources of
+# truth. The Compose *override* is the project-consistent, minimal, non-duplicative
+# pattern: it changes only the deltas that must differ in production.
+#
+# What this override adds/changes:
+#   - Redis authentication is REQUIRED (fail-closed if REDIS_PASSWORD is unset).
+#   - Containers run hardened (no new privileges, capability drop, read-only fs
+#     where practical, tmpfs for mutable paths, tini as PID 1 for signal handling).
+#   - MySQL/Redis stay internal-only (no `ports:` anywhere; only `expose:`).
+#   - Only Nginx is host-exposed, and it is explicitly bound to the host (TLS is
+#     terminated by an operator-managed reverse proxy / load balancer in front —
+#     see RUNBOOK hand-off notes: TLS termination + HSTS are DEPLOYMENT tasks).
+#   - Restart policies hardened; graceful stop windows; explicit healthchecks for
+#     every service including scheduler/worker.
+#   - Migrations are a separate ONE-SHOT service (`migrate`), never auto-run by
+#     the app on boot.
+#
+# All secrets come from the environment (`.env` / secret manager) — never here.
+
+services:
+  nginx:
+    restart: unless-stopped
+    # Only Nginx is published. Bind to the host so an upstream TLS terminator can
+    # reach it; internal services below are NOT published.
+    ports:
+      - "80:80"
+    environment:
+      # Substituted into the Nginx template by the image's envsubst entrypoint.
+      - NGINX_SERVER_NAME=${NGINX_SERVER_NAME:-localhost}
+    volumes:
+      # The nginx image auto-renders /etc/nginx/templates/*.template with envsubst.
+      - ./docker/nginx/prod.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./:/var/www/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 30s
+
+  app:
+    restart: unless-stopped
+    # tini reaps zombies and forwards SIGTERM so php-fpm drains gracefully.
+    init: true
+    user: www-data
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/run
+      # Laravel writes compiled config/route/view cache here; root fs is read-only.
+      - /var/www/html/bootstrap/cache
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      # Inject the full environment so the entrypoint can materialise .env.
+      - APP_NAME=${APP_NAME:-SiteSentinel}
+      - APP_KEY=${APP_KEY}
+      - APP_URL=${APP_URL}
+      - APP_TIMEZONE=${APP_TIMEZONE:-UTC}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - SESSION_DRIVER=${SESSION_DRIVER:-database}
+      - SESSION_SECURE_COOKIE=${SESSION_SECURE_COOKIE:-true}
+      - SESSION_HTTP_ONLY=${SESSION_HTTP_ONLY:-true}
+      - SESSION_SAME_SITE=${SESSION_SAME_SITE:-lax}
+      - SESSION_DOMAIN=${SESSION_DOMAIN}
+      - QUEUE_CONNECTION=redis
+      - CACHE_STORE=redis
+      - REDIS_CLIENT=${REDIS_CLIENT:-predis}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}
+      - MAIL_MAILER=${MAIL_MAILER}
+      - MAIL_HOST=${MAIL_HOST}
+      - MAIL_PORT=${MAIL_PORT}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS}
+      - MAIL_FROM_NAME=${MAIL_FROM_NAME}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID}
+    volumes:
+      - app-storage:/var/www/html/storage
+    healthcheck:
+      # Local PHP TCP probe of the fpm pool — no secrets, no extra tooling.
+      test: ["CMD-SHELL", "php -r 'exit(@fsockopen(\"127.0.0.1\",9000) ? 0 : 1);'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    stop_grace_period: 30s
+
+  scheduler:
+    restart: unless-stopped
+    init: true
+    user: www-data
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/run
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${APP_KEY}
+      - APP_URL=${APP_URL}
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - QUEUE_CONNECTION=redis
+      - CACHE_STORE=redis
+      - REDIS_CLIENT=${REDIS_CLIENT:-predis}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}
+    volumes:
+      # Read-only code; only the storage volume (and tmpfs) is writable (SECURITY.md §11).
+      - ./:/var/www/html:ro
+      - app-storage:/var/www/html/storage
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(@fsockopen(\"mysql\",3306) ? 0 : 1);'"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 20s
+
+  worker:
+    restart: unless-stopped
+    init: true
+    user: www-data
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /var/run
+      - /var/www/html/bootstrap/cache
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${APP_KEY}
+      - APP_URL=${APP_URL}
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - QUEUE_CONNECTION=redis
+      - CACHE_STORE=redis
+      - REDIS_CLIENT=${REDIS_CLIENT:-predis}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}
+    volumes:
+      # Read-only code; only the storage volume (and tmpfs) is writable (SECURITY.md §11).
+      - ./:/var/www/html:ro
+      - app-storage:/var/www/html/storage
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(@fsockopen(\"redis\",6379) ? 0 : 1);'"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 60s
+
+  mysql:
+    restart: unless-stopped
+    # Internal-only: `expose` (not `ports`) keeps MySQL off the host network.
+    expose:
+      - "3306"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 60s
+
+  redis:
+    restart: unless-stopped
+    # FAIL-CLOSED: refuse to start without a password (no accidental no-auth Redis).
+    entrypoint: ["/bin/sh", "-c", "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}
+    # Internal-only: `expose` (not `ports`).
+    expose:
+      - "6379"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
+
+  # One-shot migration service. Run explicitly as a deploy step:
+  #   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  #     run --rm migrate
+  # The app NEVER migrates on boot.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    profiles: ["migrate"]
+    init: true
+    user: www-data
+    volumes:
+      - app-storage:/var/www/html/storage
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${APP_KEY}
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - CACHE_STORE=redis
+      - REDIS_CLIENT=${REDIS_CLIENT:-predis}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}
+    command: ["php", "artisan", "migrate", "--force"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sitesentinel-network
+
+networks:
+  sitesentinel-network:
+    driver: bridge

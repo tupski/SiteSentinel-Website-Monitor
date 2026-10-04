@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Audit\AuditEvent;
 use App\Services\Audit\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -105,7 +106,7 @@ final class LoginController extends Controller
         $user = Auth::user();
         $user->forceFill(['last_login_at' => now()])->save();
 
-        $this->audit->log('auth.login', $user, $user);
+        $this->audit->log(AuditEvent::AUTH_LOGIN_SUCCESS, $user, $user);
 
         return redirect()->intended(route('admin.dashboard'));
     }
@@ -114,7 +115,7 @@ final class LoginController extends Controller
     {
         $user = Auth::user();
 
-        $this->audit->log('auth.logout', $user, $user);
+        $this->audit->log(AuditEvent::AUTH_LOGOUT, $user, $user);
 
         Auth::guard('web')->logout();
 
@@ -171,7 +172,7 @@ final class LoginController extends Controller
             ->where('email', mb_strtolower((string) $request->input('email')))
             ->first();
 
-        $this->audit->log('auth.login_failed', $user, $user, [
+        $this->audit->log(AuditEvent::AUTH_LOGIN_FAILURE, $user, $user, [
             'throttle_key' => $key,
             'attempts_soft' => RateLimiter::attempts($key.':soft'),
             'attempts_lockout' => RateLimiter::attempts($key.':lockout'),
@@ -185,7 +186,7 @@ final class LoginController extends Controller
             ->where('email', mb_strtolower((string) $request->input('email')))
             ->first();
 
-        $this->audit->log('auth.login_throttled', $user, $user, [
+        $this->audit->log(AuditEvent::AUTH_LOGIN_THROTTLED, $user, $user, [
             'ip' => $request->ip(),
         ]);
     }

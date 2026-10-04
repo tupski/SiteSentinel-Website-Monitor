@@ -9,6 +9,7 @@ use App\Models\Incident;
 use App\Models\NotificationChannel;
 use App\Models\NotificationLog;
 use App\Models\Website;
+use App\Services\Health\SystemHealth;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 
@@ -22,9 +23,13 @@ use Illuminate\View\View;
  */
 final class AdminDashboardController extends Controller
 {
-    public function __invoke(): View
+    public function __invoke(SystemHealth $health): View
     {
         $websites = Website::query()->orderBy('name')->get();
+
+        // AC-21: expose DB / Redis / queue-worker readiness on the dashboard so a
+        // stalled monitoring pipeline is visible to Admin without hitting /health.
+        $healthChecks = $health->checks();
 
         $counters = [
             'total' => $websites->count(),
@@ -45,6 +50,8 @@ final class AdminDashboardController extends Controller
         return view('admin.dashboard', [
             'counters' => $counters,
             'websites' => $websites,
+            'health' => $healthChecks,
+            'healthHealthy' => $health->isHealthy($healthChecks),
             'openIncidents' => Incident::query()
                 ->with('website')
                 ->whereIn('status', ['DETECTED', 'ACKNOWLEDGED'])

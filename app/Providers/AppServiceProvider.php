@@ -5,9 +5,14 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\NotificationProvider;
+use App\Services\Audit\PruningAuditRecorder;
 use App\Services\Notifications\Channels\EmailProvider;
 use App\Services\Notifications\Channels\TelegramProvider;
 use App\Services\Notifications\NotificationProviderRegistry;
+use Illuminate\Database\Events\ModelPruningFinished;
+use Illuminate\Database\Events\ModelPruningStarting;
+use Illuminate\Database\Events\ModelsPruned;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -42,6 +47,26 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // SECURITY.md §9.1: the retention pruner (`model:prune`, scheduled daily)
+        // must emit a `retention.pruned` audit event with per-model counts. The
+        // recorder listens to Laravel's pruning lifecycle events so the audit
+        // row is written once per run, without touching the built-in command.
         //
+        // The recorder is a singleton so the counts it accumulates from the
+        // per-model `ModelsPruned` events survive until `ModelPruningFinished`.
+        $this->app->singleton(PruningAuditRecorder::class);
+
+        Event::listen(
+            ModelPruningStarting::class,
+            fn (ModelPruningStarting $event) => app(PruningAuditRecorder::class)->onStarting($event),
+        );
+        Event::listen(
+            ModelsPruned::class,
+            fn (ModelsPruned $event) => app(PruningAuditRecorder::class)->onModelsPruned($event),
+        );
+        Event::listen(
+            ModelPruningFinished::class,
+            fn (ModelPruningFinished $event) => app(PruningAuditRecorder::class)->onFinished($event),
+        );
     }
 }

@@ -11,6 +11,7 @@ use App\Http\Requests\StoreNotificationChannelRequest;
 use App\Http\Requests\UpdateNotificationChannelRequest;
 use App\Models\NotificationChannel;
 use App\Models\NotificationLog;
+use App\Services\Audit\AuditEvent;
 use App\Services\Audit\AuditLogger;
 use App\Services\Notifications\MessageRedactor;
 use App\Services\Notifications\NotificationDispatcher;
@@ -128,6 +129,15 @@ final class NotificationChannelController extends Controller
             'secret_rotated' => $secret !== '',
         ]);
 
+        // SECURITY.md §9.1 canonical event: a channel's `secret_ref` change is a
+        // security-relevant event distinct from a config edit. Emit it only when
+        // the secret was actually rotated; metadata carries no secret material.
+        if ($secret !== '') {
+            $this->audit->log(AuditEvent::CHANNEL_SECRET_UPDATED, $request->user(), $channel, [
+                'type' => $channel->type,
+            ]);
+        }
+
         return redirect()
             ->route('admin.notifications.index')
             ->with('status', __('Channel updated.'));
@@ -217,7 +227,7 @@ final class NotificationChannelController extends Controller
             'sent_at' => $result->ok ? now() : null,
         ]);
 
-        $this->audit->log('notification.channel_tested', $request->user(), $channel, [
+        $this->audit->log(AuditEvent::CHANNEL_TESTED, $request->user(), $channel, [
             'ok' => $result->ok,
             'error_code' => $result->error_code,
         ]);

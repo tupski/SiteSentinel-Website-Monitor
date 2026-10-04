@@ -23,6 +23,36 @@
         </div>
     </div>
 
+    {{-- AC-21: monitoring-pipeline health/readiness (database, Redis, queue worker).
+         Status only — never a credential or internal connection detail (SECURITY.md §11). --}}
+    <section aria-labelledby="system-health-heading" class="mt-6 rounded-lg border {{ ($healthHealthy ?? true) ? 'border-slate-200' : 'border-red-300' }} bg-white p-6 shadow-sm">
+        <div class="flex items-center justify-between">
+            <h2 id="system-health-heading" class="text-lg font-semibold">{{ __('System health') }}</h2>
+            <span class="rounded-full px-3 py-1 text-xs font-semibold {{ ($healthHealthy ?? true) ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
+                {{ ($healthHealthy ?? true) ? __('All systems ready') : __('Pipeline degraded — check components') }}
+            </span>
+        </div>
+        <div class="mt-3 grid grid-cols-3 gap-4">
+            @php($healthComponents = [
+                'database' => __('Database'),
+                'redis' => __('Redis'),
+                'queue' => __('Queue worker'),
+            ])
+            @foreach ($healthComponents as $key => $label)
+                @php($component = $health[$key] ?? ['status' => 'fail'])
+                <div class="rounded-lg border border-slate-200 p-4">
+                    <div class="text-sm text-slate-500">{{ $label }}</div>
+                    <div class="mt-1 text-lg font-bold {{ ($component['status'] ?? 'fail') === 'ok' ? 'text-green-700' : 'text-red-700' }}">
+                        {{ ($component['status'] ?? 'fail') === 'ok' ? __('Ready') : __('Unavailable') }}
+                    </div>
+                    @if ($key === 'queue' && isset($component['pending_jobs']) && $component['pending_jobs'] >= 0)
+                        <div class="mt-1 text-xs text-slate-500">{{ __('Pending jobs') }}: {{ $component['pending_jobs'] }}</div>
+                    @endif
+                </div>
+            @endforeach
+        </div>
+    </section>
+
     {{-- AC-2-07 invariant: availability and security stay SEPARATE areas (AGENTS.md 15.2). --}}
     {{-- FR-101: notification failure visibility reuses counter style. --}}
     <section aria-labelledby="notifications-heading" class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">

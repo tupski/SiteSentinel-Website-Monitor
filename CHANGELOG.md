@@ -1,5 +1,120 @@
 # Changelog
 
+## [2026-10-04] — Phase 10: Acceptance Evidence (AC-20…AC-23) + audit-event reconciliation
+
+### Added (Phase 10 — acceptance evidence)
+- **AC-21 closed (GAP → PASS).** `app/Services/Health/SystemHealth.php` is the single readiness probe
+  (database / Redis / queue worker) consumed by both `HealthController` (`/health`) and the admin
+  dashboard. `AdminDashboardController` injects it and `resources/views/admin/dashboard.blade.php`
+  renders a **System health** widget (`system-health-heading`) showing each component's ready/
+  unavailable state and queue depth, so a stalled pipeline is visible to Admin. Evidence:
+  `tests/Feature/Admin/DashboardHealthTest.php` (4 tests: components present, healthy state,
+  **degraded state when a component is down**, and no-secret-leak).
+- **AC-22 closed (GAP → PASS, was only partially covered).** `tests/Feature/Notifications/IncidentCreationIsolationTest.php`
+  (3 tests) proves a permanently failing channel **never prevents incident creation** and that its
+  failed deliveries and disabled channels are **visible to Admin** on the dashboard.
+- **AC-23 closed (NOT VERIFIED → PASS, locally verifiable).** `tests/Feature/Security/NoTelemetryTest.php`
+  (6 tests) asserts no telemetry/analytics/update runtime package (composer + package.json), no
+  telemetry env vars, no telemetry routes, a local no-op broadcast driver, and that `/health` makes
+  no outbound call.
+- `tests/Feature/Security/ReferenceWorkloadInvariantsTest.php` (5 tests) pins the config invariants
+  AC-20/NFR-02 depends on (reference interval, ≥3× per-job headroom, ≥3× concurrency headroom,
+  non-overlapping due-check dispatch, active-only fan-out).
+
+### Fixed (Phase 10 — audit-event reconciliation)
+- **`retention.pruned` was documented (SECURITY.md §9.1) but never emitted.** Added
+  `app/Services/Audit/PruningAuditRecorder.php`, registered in `AppServiceProvider::boot()` on Laravel's
+  `ModelPruningStarting` / `ModelsPruned` / `ModelPruningFinished` events. One `retention.pruned`
+  audit row is now written per `model:prune` run with per-model counts in `metadata.models` +
+  `metadata.total`; no secret and no monitored content is recorded. Evidence:
+  `tests/Feature/Security/RetentionAuditTest.php` (5 tests incl. best-effort failure isolation and a
+  no-leak assertion).
+- **Audit event-name drift (code vs docs) reconciled.** SECURITY.md §9.1 was authoritative (AGENTS.md
+  §1: docs are the source of truth for names) and the code used non-canonical snake_case names. Added
+  `app/Services/Audit/AuditEvent.php` (canonical constants) and moved every emitting call site to it:
+  `auth.login`→`auth.login.success`, `auth.login_failed`→`auth.login.failure`,
+  `auth.login_throttled`→`auth.login.throttled`, `auth.password_reset_requested`→
+  `auth.password.reset.requested`, `auth.password_reset_completed`→`auth.password.reset.completed`,
+  `notification.channel_tested`→`channel.tested`, and added `channel.secret.updated` on secret rotation.
+  Evidence: `tests/Feature/Security/AuditEventCatalogueTest.php` (7 tests, incl. a code↔doc drift guard
+  that reads SECURITY.md §9.1).
+
+### Changed (Phase 10 — docs)
+- `SECURITY.md` §9.3: records that the §9.1 event strings are canonical, that they are emitted verbatim
+  by `App\Services\Audit\AuditEvent`, that a drift guard enforces agreement, and that `retention.pruned`
+  is emitted by the pruning path with redacted counts. §12 checklist row for `audit_logs` marked
+  verified for Phase 10.
+
+### Verified (Phase 10)
+- Full suite **470 passed / 0 failed (2860 assertions)** — baseline 440 + 30 new tests, **zero
+  regressions**; no real outbound network calls (HTTP faked; clock pinned with `travelTo`).
+- `php vendor/bin/pint --test` clean (16 changed files).
+
+### Not verified (deployment-only — exact procedure recorded)
+- **AC-20** "The full stack runs within the `NFR-03` envelope (2 vCPU / 4 GB / 40 GB) at the reference
+  workload, with the queue draining before the next batch is due." — **NOT VERIFIED (deployment-only).**
+  The resource envelope and the measured queue-drain time require a real host under the reference
+  workload (50 enabled websites, 5-minute interval); they cannot be produced by the local suite. The
+  locally verifiable preconditions are pinned by `ReferenceWorkloadInvariantsTest`. Verification
+  procedure: on a 2 vCPU / 4 GB / 40 GB box, seed 50 enabled websites at a 300s interval, run a queue
+  worker fleet sized to `sentinel.monitoring.max_concurrent_checks`, and confirm over ≥ 1 hour that
+  `jobs` drains to 0 well within each 300s window (≥3× headroom per `NFR-02`) with app+MySQL+Redis
+  resident memory < 4 GB and disk < 40 GB.
+
+## [2026-10-04] — Phase 10: Production Deployment Configuration (Redis auth blocker)
+
+### Added (Phase 10 — deployment)
+- `docker-compose.prod.yml` — production **override** layered on `docker-compose.yml` (single source of topology; no duplicate service definitions). Adds: fail-closed Redis auth from `REDIS_PASSWORD`, non-root + hardened containers (`init`, `cap_drop: [ALL]`, `no-new-privileges`, read-only root fs, tmpfs for mutable paths), explicit `expose:`-only internal services (MySQL/Redis never host-published), per-service healthchecks for nginx/app/scheduler/worker, graceful `stop_grace_period`, and a one-shot `migrate` service (profile `migrate`) — the app never auto-migrates on boot.
+- `docker/nginx/prod.conf` — production Nginx server block (static security headers, `server_tokens off`, PHP path-info guard, envsubst template for `NGINX_SERVER_NAME`).
+- `docker/app/zz-prod.conf` — production php-fpm pool override (`user = www-data`, `/ping` health endpoint, `process_control_timeout` for graceful drain, `expose_php off`).
+- `docker/app/entrypoint.sh` — app entrypoint: prepares storage/framework permissions on a fresh volume and materialises `.env` from the injected environment; never migrates, never prints secrets.
+
+### Changed (Phase 10 — deployment)
+- `docker-compose.yml` — base file now wires the entrypoint, `php-fpm --nodaemonize`, `queue:work --max-time=3600`, and an optional (dev-mode) Redis `--requirepass` driven by `REDIS_PASSWORD`; MySQL/Redis still publish no host ports.
+- `docker/app/Dockerfile` — copies the prod fpm pool config + entrypoint, pre-creates the storage tree owned by `www-data`, sets `USER www-data`.
+- `.env.example` — production defaults (`APP_ENV=production`, `APP_DEBUG=false`, `SESSION_SECURE_COOKIE=true`, `APP_URL`/`NGINX_SERVER_NAME` placeholders); added `REDIS_PASSWORD` (required, placeholder only), `REDIS_DB`/`REDIS_CACHE_DB`; DB/root/Redis passwords are explicit `CHANGE_ME_*` placeholders — no real secrets.
+
+### Security (Phase 10 — Redis auth BLOCKER resolution)
+- **Phase 9 BLOCKER L19 (Redis had no auth) is RESOLVED at the configuration level.** Redis in `docker-compose.prod.yml` starts with `--requirepass "$REDIS_PASSWORD"`, `${REDIS_PASSWORD:?…}` fail-closed (stack refuses to start without it), internal network only (`expose:`), and an auth-aware healthcheck (`redis-cli -a … ping`). The app consumes the same secret via `config/database.php`/`config/queue.php`/`config/cache.php`, so queue locks (`Cache::lock` in `RunWebsiteCheck`, `TelegramProvider`), the Redis queue driver, and `/health` `checkRedis()` all work with auth enabled. Credential generation/rotation/recovery documented in `SECURITY.md` §11.1. **Runtime verification is a deploy-time action** (Docker unavailable in this environment).
+- `SECURITY.md` — §11 table row updated; new §11.1 (Redis auth control + rotation/recovery); disposition rows L19/L21/L22 and §12.1.5 updated; pre-release checklist Deployment rows updated.
+
+## [2026-10-04] — Phase 10: Retention & Pruning Verification
+
+### Fixed (Phase 10 — retention, root-caused against the documented contract)
+- **Snapshots ignored their own `expires_at` (High):** `Snapshot::prunable()` aged only by `created_at`, so the column `DATABASE.md` §7/§4 designates as part of the snapshot retention model ("14d (also honors `expires_at`)") was never consulted. Consequence: a snapshot carrying a shortened `expires_at` (or an extended one) was pruned purely by wall-clock `created_at`, contradicting the frozen contract and `ExpiresSnapshot`-style expectations. `Snapshot::prunable()` now prunes by `expires_at <= now()` (set at capture time by `SnapshotWriter` to `captured_at + retention.snapshots_days`) with a `created_at` age fallback **only** for NULL-`expires_at` rows (so a legacy/manually inserted row can never become immortal). `tests/Feature/Security/SnapshotTtlPruningTest.php` locks the TTL semantics.
+- **Open-incident evidence could be pruned while the incident was still open (High, `FR-95`/PRD §16.3):** snapshot pruning was unconditional. The fix adds an `incident_id IS NULL OR incident.status = 'RESOLVED'` guard to `Snapshot::prunable()`, so evidence an **open** incident depends on survives until the incident is resolved, while evidence tied to a resolved incident is released on its normal TTL. Registered (present) but non-existent protection before this change; now enforced and regression-tested.
+
+### Added (Phase 10 — retention boundary & relationship tests)
+- `tests/Feature/Security/RetentionBoundaryTest.php` — **12 tests (49 assertions)**: frozen clock (`Carbon::setTestNow`), per-type **before / at / after** boundary assertions for `checks` (30d), `snapshots` (14d), `notification_logs` (90d), `incidents` (365d), `notification_cooldowns` (`expires_at`); FK behaviour under pruning (`checks`→`check_extractions` cascade, `incidents`→`incident_events` cascade, `snapshots.incident_id`/`notification_logs.incident_id` `ON DELETE SET NULL`); on-disk snapshot HTML artefact deletion; append-only incident history outliving its pruned snapshots; idempotent re-run; and a guard that high-volume telemetry stays `MassPrunable` (bulk delete, never `->get()->each()`).
+- `tests/Feature/Security/SnapshotTtlPruningTest.php` — **5 tests (13 assertions)**: snapshot `expires_at` is honoured (past TTL pruned even when `created_at` is recent; future TTL survives even when `created_at` is old), NULL-TTL fallback, open-incident evidence preserved until resolution, settled-incident evidence released on TTL.
+- `RetentionPruningTest::test_retention_pruning_is_scheduled_daily` — asserts `Schedule::command('model:prune')` is registered on the daily cron expression (`0 0 * * *`) via `routes/console.php`.
+
+### Verified (Phase 10 — retention)
+- Canonical retention values match docs exactly: `checks` 30d (configurable 30/60/90, `retention.checks_allowed_days`), `incidents` 365d, `notification_logs` 90d, `snapshots` 14d (`config/sentinel.php` ↔ `PRD.md` §16.1 ↔ `DATABASE.md` §4). No documented-vs-actual mismatch remains.
+- Retention suite **24 tests (81 assertions)**; full suite **440 tests, 440 passed (2523 assertions), 0 failed**. `php vendor/bin/pint` clean on changed files.
+
+## [2026-10-03] — Phase 10: Detection Rule Coverage & Data-Flow Verification
+
+### Fixed (Phase 10 — detection data-flow, root-caused from the real pipeline)
+- **RULE-RED-005 / RULE-RED-003 (High):** `Probe` persisted each `checks.redirect_chain` hop as `{url, status, is_redirect}` with **no destination**, so the canonical hop shape required by `DETECTION-RULES.md` §8.3 (status + from + to) was never collected. `RULE-RED-005` (HTTPS→HTTP downgrade) could therefore **never fire** on a real check, and `RULE-RED-003` (redirect to a suspicious/external target) could not read the hop target either. `Probe` now records `to_url` per hop (the resolved `Location`; `null` on the final non-redirect hop). No schema change (`redirect_chain` is JSON).
+- **RULE-RED-003 (Medium):** `RuleEngine::evaluateRedirect` derived the expected domain only from `websites.expected_final_domain` or the baseline `final_url`. On a first check with no explicit override and no baseline, `expected` was empty, so a redirect to an external/suspicious host was never compared. It now falls back to the monitored website host **only when the check redirected to a different registrable domain** (a genuine hijack), so `RULE-RED-003` can fire without suppressing the documented `RULE-RED-001` signal for same-host hops such as an `https → http` downgrade.
+
+### Added (Phase 10 — detection data-flow & severity-consistency tests)
+- `tests/Feature/Detection/RedirectAndProbeDataFlowTest.php` — **9 tests (96 assertions)**: drives the real `RunWebsiteCheck` + `Probe` pipeline with `Http::fake` (no live network) and a `travelTo` clock. Proves the `Probe` hop-shape fix (each persisted hop carries `to_url`), regression coverage that `RULE-RED-005`, `RULE-RED-003`, `RULE-RED-002`, `RULE-RED-001`, `RULE-AV-003/004/005` and `RULE-CNT-001` fire from **persisted** check data (not hand-built fixtures), that a connection failure persists a NULL `http_status` (never fabricated), and that severity expectations are consistent across the rule registry (`detection_rules.severity` ↔ `DETECTION-RULES.md` §8) and the incident engine (`SUSPECT`→`WARNING`, `INCIDENT`→`CRITICAL`).
+- Updated `tests/Fixtures/detection/per_rule.json` case `red_006_ssrf_redirect` to assert the now-correct co-fire of `RULE-RED-002` (blocked hop lands on a different host) and its recomputed score (39).
+
+### Verified (Phase 10 — detection coverage)
+- **Rule coverage:** all **36 registered rules** verified — **33 fire** with real persisted inputs and fixture coverage, **3 are documented non-firing at MVP** (`RULE-SSL-005` weight 0 / visibility-only; `RULE-SEO-002` and `RULE-SEO-003` Future per `DETECTION-RULES.md` §8.8, shipped disabled). No other rule is registered-but-dead.
+- Detection suite **72 tests (798 assertions)**; full suite **422 tests, 422 passed (2459 assertions), 0 failed**. `php vendor/bin/pint --test` clean on all changed files.
+
+## [2026-10-03] — Phase 10: Testing & Production Readiness (test harness)
+
+### Fixed (Phase 10 — pre-existing suite failures, root-caused not suppressed)
+- **Test harness (Medium):** removed the blanket `config(['session.driver' => 'database'])` override in `tests/TestCase.php`. It contradicted `phpunit.xml`'s `SESSION_DRIVER=array`, was redundant for `RefreshDatabase` tests (which already opt into the database driver per-test, e.g. `LogoutAndResetTest`, `SessionTimeoutTest`), and broke the three HTTP classes that do **not** migrate the in-memory SQLite DB (`BaseLayoutTest`, `ExampleTest`, `HealthEndpointTest`): their first request triggered a session read against the non-existent `sessions` table → `SQLSTATE[HY000]: General error: 1 no such table: sessions` → HTTP 500. Category (c): incorrect session-driver assumption in the shared test harness — **not** an application defect and **not** a missing migration. The `sessions` table **is** defined by `0001_01_01_000000_create_users_table.php` (lines 36–43), and `SESSION_DRIVER=database` remains the production driver (`.env.example`). No new migration was needed: production already gets the table from the users migration; only the test harness forced `database` before any migration had run. This restores the documented architecture (SQLite for tests / MySQL 8 for production) and makes `phpunit.xml` the single source of truth for the suite-wide driver. No test was skipped, deleted, or weakened; no acceptance criteria changed.
+
+### Verified (Phase 10 close — test harness)
+- Full suite **413 tests, 413 passed (2363 assertions), 0 failed** — all 5 previously failing `sessions` cases resolved (count was 408 passed / 5 failed). `vendor/bin/pint --test tests/TestCase.php` clean. `php artisan migrate:fresh --env=testing` runs all 24 migrations cleanly from scratch.
+
 ## [2026-10-03] — Phase 9: Security Hardening
 
 ### Added (Phase 9 — Security Hardening)

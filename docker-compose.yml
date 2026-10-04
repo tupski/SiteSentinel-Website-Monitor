@@ -1,3 +1,14 @@
+# SiteSentinel — base Compose file (development-friendly defaults).
+#
+# Production MUST layer the hardened override on top of this file:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Never maintain two divergent Compose files: this base defines the topology and
+# docker-compose.prod.yml only overrides settings that differ in production
+# (Redis auth, non-root user, security options, restart policy, healthchecks).
+#
+# SECURITY.md §11: only Nginx is exposed to the host. MySQL and Redis are internal
+# network-only (no published ports). In production they additionally require auth.
+
 services:
   nginx:
     image: nginx:alpine
@@ -20,6 +31,10 @@ services:
       dockerfile: docker/app/Dockerfile
     container_name: sitesentinel-app
     restart: unless-stopped
+    # Entrypoint prepares storage/framework directories + a .env from the
+    # environment so php-fpm works on a fresh volume (see docker/app/entrypoint.sh).
+    entrypoint: ["/usr/local/bin/entrypoint.sh"]
+    command: ["php-fpm", "--nodaemonize"]
     volumes:
       - ./:/var/www/html
       - app-storage:/var/www/html/storage
@@ -40,6 +55,8 @@ services:
       dockerfile: docker/app/Dockerfile
     container_name: sitesentinel-scheduler
     restart: unless-stopped
+    # Dedicated scheduler service — never run `schedule:run` from cron inside the
+    # app container (race). `schedule:work` runs the schedule in-process.
     command: ["php", "artisan", "schedule:work"]
     volumes:
       - ./:/var/www/html
@@ -60,7 +77,7 @@ services:
       dockerfile: docker/app/Dockerfile
     container_name: sitesentinel-worker
     restart: unless-stopped
-    command: ["php", "artisan", "queue:work", "redis", "--queue=monitoring,notifications,maintenance,default", "--sleep=3", "--tries=3"]
+    command: ["php", "artisan", "queue:work", "redis", "--queue=monitoring,notifications,maintenance,default", "--sleep=3", "--tries=3", "--max-time=3600"]
     volumes:
       - ./:/var/www/html
       - app-storage:/var/www/html/storage
@@ -97,17 +114,20 @@ services:
     image: redis:7-alpine
     container_name: sitesentinel-redis
     restart: unless-stopped
-    # PRODUCTION BLOCKER (SECURITY.md §11, §12.1 L19): Redis is not publicly
-    # exposed here (no host port), but auth is NOT enabled. Before production,
-    # enable `--requirepass` (from a secret) and set REDIS_PASSWORD in .env.
-    # Do NOT commit a real password to this file.
-    command: ["redis-server", "--appendonly", "yes"]
+    # Auth is required whenever REDIS_PASSWORD is set (production always sets it).
+    # The password is injected from the environment only — never hardcoded here.
+    # `--appendonly yes` + an internal-only network keeps data durable and private.
+    entrypoint: ["/bin/sh", "-c", "exec redis-server --appendonly yes $${REDIS_PASSWORD:+--requirepass \"$${REDIS_PASSWORD}\"}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - redis-data:/data
     networks:
       - sitesentinel-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Authenticate with the injected password so the probe matches a real client.
+      # `$$` escapes Compose interpolation so the *container shell* expands the var.
+      test: ["CMD-SHELL", "redis-cli $${REDIS_PASSWORD:+-a \"$${REDIS_PASSWORD}\"} --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
