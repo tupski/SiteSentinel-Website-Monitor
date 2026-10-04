@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\StatusPage;
+use App\Services\StatusPage\PublicStatusPeriod;
 use App\Services\StatusPage\StatusPageCache;
 use App\Services\StatusPage\StatusPageUnlockService;
 use App\Services\StatusPage\VisibilityGate;
@@ -38,13 +39,20 @@ final class StatusPageController extends Controller
                 ->header('X-Robots-Tag', 'noindex, nofollow');
         }
 
-        $dto = $cache->remember($statusPage);
+        // The reporting period is an allowlisted enum, never free-form input
+        // (STATUS-PAGE.md §10.1: no parameter may induce a fetch or unbounded
+        // aggregation). An unknown value falls back to the default.
+        $period = PublicStatusPeriod::resolve($request->query('period'));
+
+        $dto = $cache->remember($statusPage, $period);
         $historyEnabled = (bool) config('sentinel.status_page.history_enabled', false);
 
         $response = response()->view('status.show', [
             'dto' => $dto,
             'statusPage' => $statusPage,
             'historyEnabled' => $historyEnabled,
+            'period' => $period,
+            'periods' => PublicStatusPeriod::all(),
         ], 200);
 
         $response->headers->set('X-Robots-Tag', 'noindex, nofollow');
@@ -71,7 +79,9 @@ final class StatusPageController extends Controller
                 ->header('X-Robots-Tag', 'noindex, nofollow');
         }
 
-        $dto = $cache->remember($statusPage);
+        $period = PublicStatusPeriod::resolve($request->query('period'));
+
+        $dto = $cache->remember($statusPage, $period);
 
         return response()->json($dto->toArray(), 200)
             ->header('X-Robots-Tag', 'noindex, nofollow')

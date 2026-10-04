@@ -66,4 +66,40 @@ final class ChartComponentTest extends TestCase
         $this->assertStringNotContainsString('<polyline', $raw);
         $this->assertStringNotContainsString('<rect', $raw);
     }
+
+    public function test_each_bar_carries_a_native_tooltip_title(): void
+    {
+        $html = $this->blade(
+            '<x-ui.chart type="bar" title="Availability" :series="$series" />',
+            ['series' => [
+                ['label' => '2026-10-04 10:00', 'value' => 100],
+                ['label' => '2026-10-04 11:00', 'value' => 50],
+            ]]
+        );
+
+        $raw = (string) $html;
+
+        // A per-bar <title> gives a tooltip without JS and is read by AT.
+        $this->assertStringContainsString('<title>2026-10-04 10:00: 100</title>', $raw);
+        $this->assertStringContainsString('<title>2026-10-04 11:00: 50</title>', $raw);
+
+        // The styled hover tooltip is wired to the registered Alpine component.
+        $this->assertStringContainsString('x-data="chartTooltip()"', $raw);
+        $this->assertStringContainsString('x-on:mouseenter="show(', $raw);
+        $this->assertStringContainsString('x-text="label"', $raw);
+    }
+
+    public function test_tooltips_can_be_disabled(): void
+    {
+        $html = $this->blade(
+            '<x-ui.chart type="bar" title="Availability" :series="$series" :tooltips="false" />',
+            ['series' => [['label' => 'a', 'value' => 1]]]
+        );
+
+        $raw = (string) $html;
+
+        // The native title remains (accessible); the Alpine hover layer is off.
+        $this->assertStringContainsString('<title>a: 1</title>', $raw);
+        $this->assertStringNotContainsString('chartTooltip', $raw);
+    }
 }

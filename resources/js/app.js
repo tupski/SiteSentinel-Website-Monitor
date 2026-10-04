@@ -524,6 +524,44 @@ Alpine.data('flashMessage', () => ({
 }));
 
 /**
+ * Server-rendered SVG chart hover tooltip (ADR-037).
+ *
+ * The chart itself is static, server-rendered inline SVG; this component only
+ * positions a styled tooltip when a bar is hovered. It owns local UI state
+ * only — no data fetching, no business logic. A native `<title>` on every bar
+ * already provides the same information without JavaScript (progressive
+ * enhancement), so this component is purely cosmetic.
+ *
+ * `show()` receives the already-safe display strings from the Blade component
+ * (never raw values), so no formatting or interpretation happens here.
+ */
+Alpine.data('chartTooltip', () => ({
+    visible: false,
+    label: '',
+    value: '',
+    detail: '',
+    x: 0,
+    y: 0,
+
+    show(event, label, value, detail) {
+        const rect = this.$root.getBoundingClientRect();
+        const target = event.currentTarget.getBoundingClientRect();
+
+        // Position relative to the chart root, above the hovered bar.
+        this.x = target.left - rect.left + (target.width / 2);
+        this.y = target.top - rect.top;
+        this.label = label || '';
+        this.value = value || '';
+        this.detail = detail || '';
+        this.visible = true;
+    },
+
+    hide() {
+        this.visible = false;
+    },
+}));
+
+/**
  * Precise local-time footer (Requirement 26, ADR-040).
  *
  * The server emits the projection stamp as UTC ISO-8601 on a `<time datetime>`;
@@ -828,52 +866,63 @@ Alpine.data('statusRefresh', (options = {}) => ({
 
         const list = document.getElementById('status-services');
         if (list && Array.isArray(data.services)) {
-            this.renderServices(list, data.services);
+            this.updateServices(list, data.services);
         }
 
         this.updateTimestamp(document.getElementById('status-last-update'), data.updatedAt);
     },
 
-    renderServices(list, services) {
-        list.textContent = '';
-
-        if (services.length === 0) {
-            const empty = document.createElement('li');
-            empty.className = 'p-4 text-sm text-text-subtle';
-            empty.textContent = 'No services published.';
-            list.appendChild(empty);
-            return;
-        }
-
+    /**
+     * Update the live text of each server-rendered service card IN PLACE.
+     *
+     * The cards (and their inline-SVG availability charts) are rendered
+     * server-side; a refresh only needs to refresh the coarse label, the
+     * sample-based uptime figure and the day bucket. Rebuilding the nodes would
+     * discard the charts and the `chartTooltip` instances, so this mutates the
+     * existing DOM only. A service with no matching card is skipped.
+     */
+    updateServices(list, services) {
         services.forEach((service) => {
-            const item = document.createElement('li');
-            item.className = 'flex items-center justify-between gap-4 p-4';
-
-            const left = document.createElement('div');
-            const name = document.createElement('p');
-            name.className = 'font-medium text-text';
-            name.textContent = service.displayName ?? '';
-            const updated = document.createElement('p');
-            updated.className = 'text-xs text-text-subtle';
-            updated.textContent = 'Updated ' + (service.dayBucket ?? '');
-            left.appendChild(name);
-            left.appendChild(updated);
-
-            const label = document.createElement('p');
-            label.className = 'text-sm font-semibold text-text';
-            label.textContent = service.publicLabel ?? '';
-            if (service.responseBand) {
-                const band = document.createElement('span');
-                band.className = 'ml-2 font-normal text-text-subtle';
-                band.textContent = '(' + service.responseBand + ')';
-                label.appendChild(document.createTextNode(' '));
-                label.appendChild(band);
+            const index = service.opaqueIndex;
+            if (typeof index !== 'string' || index === '') {
+                return;
             }
 
-            item.appendChild(left);
-            item.appendChild(label);
-            list.appendChild(item);
+            const card = list.querySelector('[data-status-service="' + index + '"]');
+            if (!card) {
+                return;
+            }
+
+            const label = card.querySelector('[data-service-label]');
+            if (label && typeof service.publicLabel === 'string') {
+                label.textContent = service.publicLabel;
+            }
+
+            const uptime = card.querySelector('[data-service-uptime]');
+            if (uptime) {
+                if (service.uptime && service.uptime.available === true) {
+                    uptime.textContent = this.uptimeText(service.uptime);
+                } else {
+                    uptime.textContent = 'No availability data yet';
+                }
+            }
+
+            const bucket = card.querySelector('[data-service-bucket]');
+            if (bucket && typeof service.dayBucket === 'string') {
+                bucket.textContent = 'Updated ' + service.dayBucket;
+            }
         });
+    },
+
+    /**
+     * Format the public-safe uptime figure (`100.00% · 0 failed checks`). The
+     * exact response time is never part of the public projection.
+     */
+    uptimeText(uptime) {
+        const percent = typeof uptime.percent === 'number' ? uptime.percent : 0;
+        const down = typeof uptime.down === 'number' ? uptime.down : 0;
+
+        return percent.toFixed(2) + '% \u00b7 ' + down + ' failed checks';
     },
 
     /**

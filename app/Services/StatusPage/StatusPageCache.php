@@ -23,18 +23,19 @@ final class StatusPageCache
         private readonly StatusProjector $projector,
     ) {}
 
-    public function remember(StatusPage $page): PublicStatusDTO
+    public function remember(StatusPage $page, string $period = PublicStatusPeriod::DEFAULT): PublicStatusDTO
     {
+        $period = PublicStatusPeriod::resolve($period);
         $ttl = $this->ttl($page);
-        $key = $this->key($page);
+        $key = $this->key($page, $period);
 
         // Store the DTO's plain allowlist array, never the object. Laravel's
         // `cache.serializable_classes` defaults to false (gadget-chain defense),
         // so a serializing store (database/file/redis) would hand back a
         // `__PHP_Incomplete_Class` for a cached object. The array form survives
         // any store and is still "DTO only, never raw rows" (STATUS-PAGE.md §9).
-        /** @var array{banner: string, services: array<int, mixed>, updatedDayBucket: string, updatedAt: string} $payload */
-        $payload = Cache::remember($key, $ttl, fn (): array => $this->projector->project($page)->toArray());
+        /** @var array{banner: string, services: array<int, mixed>, updatedDayBucket: string, updatedAt: string, period: string, periodLabel: string} $payload */
+        $payload = Cache::remember($key, $ttl, fn (): array => $this->projector->project($page, null, $period)->toArray());
 
         return PublicStatusDTO::fromArray($payload);
     }
@@ -62,7 +63,7 @@ final class StatusPageCache
         }
     }
 
-    public function key(?StatusPage $page = null): string
+    public function key(?StatusPage $page = null, string $period = PublicStatusPeriod::DEFAULT): string
     {
         $page ??= StatusPage::resolveDefault();
 
@@ -70,7 +71,9 @@ final class StatusPageCache
         $slugHash = sha1((string) $page->slug);
         $stamp = $page->updated_at?->copy()->setTimezone('UTC')->format('Y-m-d\TH:i:s\Z') ?? 'never';
 
-        return $prefix.':'.$slugHash.':'.$page->id.':'.$stamp.':'.$this->epoch();
+        // The period is part of the key so a filtered projection never serves a
+        // different window's history (STATUS-PAGE.md §9.2).
+        return $prefix.':'.$slugHash.':'.$page->id.':'.$stamp.':'.PublicStatusPeriod::resolve($period).':'.$this->epoch();
     }
 
     public function ttl(?StatusPage $page = null): int

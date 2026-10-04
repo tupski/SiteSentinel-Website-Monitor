@@ -138,8 +138,8 @@
                 <legend class="px-2 text-sm font-medium text-text">{{ __('Telegram settings') }}</legend>
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <x-form.field name="telegram_chat_id" :label="__('Chat ID')" required
-                                  hint="{{ __('Numeric chat or channel id.') }}"
-                                  help="{{ __('The Telegram chat/channel the bot posts to. Required for Telegram channels. The bot must be a member of that chat.') }}">
+                                  hint="{{ __('Numeric chat ID, or @channelusername for public channels.') }}"
+                                  help="{{ __('Where the bot posts alerts — NOT the bot’s own ID. For a private chat: open your bot in Telegram, send it any message, then use the chat ID it reports. For a group: add the bot to the group (group IDs are negative, e.g. -1001234567890). For a public channel: use @channelusername.') }}">
                         <x-ui.input id="telegram_chat_id" name="telegram_chat_id" type="text" :value="old('telegram_chat_id', $config['chat_id'] ?? '')" autocomplete="off"
                                x-bind:disabled="type !== 'telegram'"
                                aria-describedby="telegram_chat_id-hint" :invalid="$errors->has('telegram_chat_id')" />

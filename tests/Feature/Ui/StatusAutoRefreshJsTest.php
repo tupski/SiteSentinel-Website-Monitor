@@ -62,6 +62,17 @@ final class StatusAutoRefreshJsTest extends TestCase
         $this->assertStringContainsString('Intl.DateTimeFormat', $js);
     }
 
+    public function test_chart_tooltip_component_is_registered(): void
+    {
+        $js = $this->appJs();
+
+        // The SVG chart hover tooltip is a registered Alpine component (never
+        // inline in Blade, per AGENTS.md §7).
+        $this->assertStringContainsString("Alpine.data('chartTooltip'", $js);
+        $this->assertStringContainsString('show(', $js);
+        $this->assertStringContainsString('hide()', $js);
+    }
+
     public function test_status_view_binds_registered_components_not_inline_objects(): void
     {
         $view = $this->showView();

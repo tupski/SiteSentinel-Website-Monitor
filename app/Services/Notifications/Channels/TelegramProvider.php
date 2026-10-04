@@ -139,7 +139,21 @@ final class TelegramProvider implements NotificationProvider
         if (in_array($status, [400, 401, 403, 404], true)) {
             $isParseError = $status === 400 && stripos($description, 'parse') !== false;
 
-            return ['ok' => false, 'message_id' => null, 'error_code' => 'telegram_'.$status, 'error_message' => $description, 'retryable' => false, 'parse_error' => $isParseError && $html, 'retry_after' => null];
+            // The two most common operator mistakes deserve an actionable
+            // message rather than Telegram's terse "chat not found". The bot
+            // can only post to a chat it belongs to, and it can never open a
+            // conversation itself — the target must message the bot first, or
+            // the bot must be added to the group/channel.
+            $hint = '';
+            if ($status === 400 && stripos($description, 'chat not found') !== false) {
+                $hint = ' — the chat_id does not exist or the bot has never been messaged/added there. Send the bot a message first (or add it to the group/channel), then use the id Telegram reports.';
+            } elseif ($status === 403) {
+                $hint = ' — the bot is not a member of that chat, or was blocked.';
+            } elseif ($status === 401) {
+                $hint = ' — the bot token is invalid or revoked.';
+            }
+
+            return ['ok' => false, 'message_id' => null, 'error_code' => 'telegram_'.$status, 'error_message' => $description.$hint, 'retryable' => false, 'parse_error' => $isParseError && $html, 'retry_after' => null];
         }
 
         return ['ok' => false, 'message_id' => null, 'error_code' => 'telegram_'.$status, 'error_message' => $description, 'retryable' => true, 'parse_error' => false, 'retry_after' => null];

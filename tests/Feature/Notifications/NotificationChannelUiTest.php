@@ -100,9 +100,12 @@ final class NotificationChannelUiTest extends TestCase
     }
 
     /**
-     * Bind a spy in a resolvable way: copy scripted flags onto the spy and bind
-     * it, and mirror the binding onto the anonymous subclass name the
-     * controller instantiates so config/secret construction resolves too.
+     * Bind a spy in a resolvable way: copy scripted flags onto the spy and
+     * register it behind a closure factory. The controller always resolves the
+     * provider with `channelConfig`/`channelSecret` constructor overrides, so a
+     * plain `instance()` binding would be bypassed; a closure binding receives
+     * (and ignores) those overrides and returns the spy, so the test still
+     * proves the controller routes through the provider contract.
      *
      * @param  class-string<NotificationProvider>  $forClass
      */
@@ -111,7 +114,7 @@ final class NotificationChannelUiTest extends TestCase
         $spy->ok = $ok;
         $spy->errors = $errors;
 
-        $this->app->instance($forClass, $spy);
+        $this->app->bind($forClass, fn (): NotificationProvider => $spy);
 
         return $spy;
     }

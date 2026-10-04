@@ -138,10 +138,15 @@ final class EnumerationTest extends StatusPageTestCase
 
         $this->assertIsArray($decoded);
         $this->assertArrayHasKey('services', $decoded);
-        // The DTO allowlist is exactly these four keys (`updatedAt` is the
-        // precise projection stamp added by ADR-040 — a freshness signal, not
-        // security detail; see RedactionRegressionTest).
-        $this->assertSame(['banner', 'services', 'updatedDayBucket', 'updatedAt'], array_keys($decoded));
+        // The DTO allowlist is exactly these keys: `updatedAt` is the precise
+        // projection stamp added by ADR-040 (a freshness signal, not security
+        // detail), and `period`/`periodLabel` are the allowlisted reporting
+        // window for the availability history (FR-79). No security detail,
+        // response time, or internal id is present (see RedactionRegressionTest).
+        $this->assertSame(
+            ['banner', 'services', 'updatedDayBucket', 'updatedAt', 'period', 'periodLabel'],
+            array_keys($decoded)
+        );
     }
 
     public function test_public_output_has_no_admin_links_or_internal_paths(): void

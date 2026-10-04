@@ -13,6 +13,7 @@ use App\Services\Settings\SettingsRepository;
 use Illuminate\Database\Events\ModelPruningFinished;
 use Illuminate\Database\Events\ModelPruningStarting;
 use Illuminate\Database\Events\ModelsPruned;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -52,6 +53,25 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Local development: `php artisan dev` runs the HTTP server, a queue
+        // listener, and Vite — but NOT the scheduler. Without a scheduler and a
+        // worker, the monitoring plane silently stalls: the every-minute sweep
+        // that dispatches due checks never runs, and any job that IS dispatched
+        // sits unconsumed on the queue (a website's "last check" freezes). Add
+        // `schedule:work` to the dev process group so a single command brings up
+        // the complete local stack. Guarded to console so web requests are
+        // unaffected, and registered by userland code so it outranks the
+        // framework default and survives upgrades.
+        if ($this->app->runningInConsole()) {
+            DevCommands::artisan('schedule:work', 'scheduler');
+
+            // The framework default dev queue command listens only to the
+            // `default` queue, so notifications (pinned to `notifications`)
+            // would sit undelivered locally. Register the same name with a
+            // userland priority so it replaces the default and drains both.
+            DevCommands::artisan('queue:listen --queue=default,notifications --tries=1 --timeout=0', 'queue');
+        }
+
         // SECURITY.md §9.1: the retention pruner (`model:prune`, scheduled daily)
         // must emit a `retention.pruned` audit event with per-model counts. The
         // recorder listens to Laravel's pruning lifecycle events so the audit

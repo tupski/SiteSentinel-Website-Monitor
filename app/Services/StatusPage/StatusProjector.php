@@ -15,23 +15,31 @@ use Illuminate\Support\Collection;
 /**
  * Public-safe projection chokepoint (STATUS-PAGE.md §4-§6).
  *
- * Reads website snapshots + open incident severity only. Never touches
- * URLs, IPs, keywords, domains, rules, scores, snapshots, headers.
+ * Reads website snapshots + open incident severity + bucketed availability
+ * only. Never touches URLs, IPs, keywords, domains, rules, scores, snapshots,
+ * headers, or the exact response time.
  *
  * Projects a SINGLE {@see StatusPage}: a page never exposes another page's
  * websites (ADR-031). A website with `status_page_id IS NULL` belongs to the
  * default page only.
+ *
+ * The availability history (§4.3, FR-79) is expressed ONLY as per-bucket
+ * availability counts/percentages — the same public-safe shape the internal
+ * analytics uses. The exact `checks.duration_ms` figure is NEVER emitted
+ * (§4.3: "The exact millisecond value is never emitted").
  */
 final class StatusProjector
 {
-    public function project(StatusPage $page, ?Carbon $now = null): PublicStatusDTO
+    public function project(StatusPage $page, ?Carbon $now = null, string $period = PublicStatusPeriod::DEFAULT): PublicStatusDTO
     {
         $now ??= Carbon::now('UTC');
+        $period = PublicStatusPeriod::resolve($period);
 
         /** @var Collection<int, Website> $websites */
         $websites = $this->publishedQuery($page)->get();
 
         $openSeverities = $this->openSeverities($websites);
+        $history = $this->availabilityHistory($websites, $period, $now);
 
         $services = [];
         $sortIndex = 0;
@@ -55,6 +63,12 @@ final class StatusProjector
                 $row['responseBand'] = $band;
             }
 
+            $perWebsite = $history[$website->id] ?? null;
+            if ($perWebsite !== null) {
+                $row['uptime'] = $perWebsite['uptime'];
+                $row['history'] = $perWebsite['history'];
+            }
+
             $services[] = $row;
             $sortIndex++;
         }
@@ -70,6 +84,8 @@ final class StatusProjector
             // projection time only — never an incident or check timestamp.
             updatedDayBucket: $utcNow->format('Y-m-d'),
             updatedAt: $utcNow->format('Y-m-d\TH:i:s\Z'),
+            period: $period,
+            periodLabel: PublicStatusPeriod::label($period),
         );
     }
 
@@ -130,6 +146,131 @@ final class StatusProjector
         }
 
         return $worst;
+    }
+
+    /**
+     * Per-website public-safe availability history + uptime over the period.
+     *
+     * Only `availability_state` (UP/DOWN) is read from `checks`; the exact
+     * duration is never selected. Buckets with no observation are omitted so a
+     * gap is never fabricated as a 0% bar. When a website has no availability
+     * observation at all the uptime is reported as unavailable (`available =
+     * false`) and the history is empty — the view renders an explicit
+     * "no data" state rather than a misleading 0%.
+     *
+     * @param  Collection<int, Website>  $websites
+     * @return array<int, array{uptime: array{available: bool, percent: float|null, up: int, down: int, total: int}, history: list<array{label: string, value: float, up: int, total: int}>}>
+     */
+    private function availabilityHistory(Collection $websites, string $period, Carbon $now): array
+    {
+        if ($websites->isEmpty()) {
+            return [];
+        }
+
+        $start = PublicStatusPeriod::start($period, $now);
+
+        /** @var Collection<int, Check> $checks */
+        $checks = Check::query()
+            ->whereIn('website_id', $websites->pluck('id')->all())
+            ->where('started_at', '>=', $start)
+            ->where('started_at', '<=', $now->copy()->setTimezone('UTC'))
+            ->orderBy('started_at')
+            ->get(['id', 'website_id', 'started_at', 'availability_state']);
+
+        $byWebsite = $checks->groupBy('website_id');
+
+        $result = [];
+        foreach ($websites as $website) {
+            /** @var Collection<int, Check> $rows */
+            $rows = $byWebsite->get($website->id, collect());
+
+            $result[$website->id] = [
+                'uptime' => $this->uptime($rows),
+                'history' => $this->bucketedSeries($rows, $period),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Sample-based uptime over a set of checks. Returns `available = false`
+     * when there is no availability observation to divide by — never 0%.
+     *
+     * @param  Collection<int, Check>  $checks
+     * @return array{available: bool, percent: float|null, up: int, down: int, total: int}
+     */
+    private function uptime(Collection $checks): array
+    {
+        $total = 0;
+        $up = 0;
+
+        foreach ($checks as $check) {
+            $state = $check->availability_state;
+            if ($state === null) {
+                continue;
+            }
+
+            $total++;
+            if ($state === 'UP') {
+                $up++;
+            }
+        }
+
+        if ($total === 0) {
+            return ['available' => false, 'percent' => null, 'up' => 0, 'down' => 0, 'total' => 0];
+        }
+
+        return [
+            'available' => true,
+            'percent' => round($up / $total * 100, 2),
+            'up' => $up,
+            'down' => $total - $up,
+            'total' => $total,
+        ];
+    }
+
+    /**
+     * Bucketed availability series for one website. Buckets with no
+     * observation are omitted (never a fabricated 0% bar).
+     *
+     * @param  Collection<int, Check>  $checks
+     * @return list<array{label: string, value: float, up: int, total: int}>
+     */
+    private function bucketedSeries(Collection $checks, string $period): array
+    {
+        $buckets = [];
+
+        foreach ($checks as $check) {
+            $state = $check->availability_state;
+            $at = $check->started_at;
+            if ($state === null || $at === null) {
+                continue;
+            }
+
+            $key = PublicStatusPeriod::bucketKey($at, $period);
+            $buckets[$key] ??= ['up' => 0, 'total' => 0];
+            $buckets[$key]['total']++;
+            if ($state === 'UP') {
+                $buckets[$key]['up']++;
+            }
+        }
+
+        ksort($buckets);
+
+        $series = [];
+        foreach ($buckets as $label => $bucket) {
+            $series[] = [
+                'label' => (string) $label,
+                'value' => $bucket['total'] > 0
+                    ? round($bucket['up'] / $bucket['total'] * 100, 1)
+                    : 0.0,
+                'up' => $bucket['up'],
+                'total' => $bucket['total'],
+            ];
+        }
+
+        return $series;
     }
 
     private function deriveLabel(Website $website, ?string $openSeverity, Carbon $now): string

@@ -281,7 +281,7 @@ final class CacheTest extends StatusPageTestCase
 
         $this->assertSame('2026-10-04T15:37:00Z', $cached->updatedAt);
         $this->assertSame(
-            ['banner', 'services', 'updatedDayBucket', 'updatedAt'],
+            ['banner', 'services', 'updatedDayBucket', 'updatedAt', 'period', 'periodLabel'],
             array_keys($cached->toArray())
         );
     }

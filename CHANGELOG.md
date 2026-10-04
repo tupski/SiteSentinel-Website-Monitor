@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — Public status page: availability-history bars + date filters + hover tooltips
+
+Brings the `FR-84` "historical availability" idea forward as a **redaction-safe** upgrade of the default
+public status page. The bars encode **per-bucket availability** (0–100 % up), never the exact response
+time, which `STATUS-PAGE.md` §4.3 forbids publicly (infrastructure fingerprinting).
+
+- [`app/Services/StatusPage/PublicStatusPeriod.php`](app/Services/StatusPage/PublicStatusPeriod.php) —
+  allowlisted reporting period enum (`24h`/`7d`/`30d`/`90d`, default `24h`) with UTC bucketing (hourly
+  for `24h`, daily otherwise). Unknown input falls back to the default — never trusted.
+- `PublicStatusDTO` gains the allowlisted `period`/`periodLabel` and a per-service public-safe
+  `uptime` (`{available, percent, up, down, total}`) + `history` (`[{label, value, up, total}]`).
+  Both are added to the §4.3 allowlist only; no response time, security state, rule, domain or IP.
+- `StatusProjector::project()` accepts the period and reads **only** `checks.availability_state` +
+  `started_at` (never `duration_ms`); empty buckets are omitted, never fabricated as 0 %.
+- `StatusPageCache` keys now include the period, so a filtered window never serves another window's
+  projection.
+- `StatusPageController::show()`/`json()` resolve `?period=` via the allowlist.
+- `resources/views/status/show.blade.php` rebuilt as a reference-style page: dark overall banner,
+  server-rendered period filter chips (no JS required), one card per service with an inline-SVG
+  availability chart, and the existing ADR-040 local-time footer. Social icons / theme footer are
+  intentionally omitted.
+- `resources/views/status/_service.blade.php` — the per-service card partial.
+- `resources/views/components/ui/chart.blade.php` — every bar now carries a native `<title>` tooltip
+  (works without JS, read by AT) plus a styled hover tooltip driven by the registered
+  `chartTooltip` Alpine component; `:tooltips="false"` disables the styled layer.
+- `resources/js/app.js` — new `chartTooltip` Alpine component, and `statusRefresh` now updates the
+  server-rendered cards' live text in place (label / uptime / day bucket) instead of rebuilding the
+  nodes, preserving the charts.
+- Tests: `StatusPageHistoryTest` (new), plus `ChartComponentTest`, `EnumerationTest`, `CacheTest`,
+  `StatusAutoRefreshJsTest` updated for the new allowlist keys and tooltip markup.
+
 ## [Unreleased] — Phase A foundations (ADRs + in-app notifications + shared icon component)
 
 ### Added

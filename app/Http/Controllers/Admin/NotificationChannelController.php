@@ -488,12 +488,17 @@ final class NotificationChannelController extends Controller
                 return new DeliveryResult(ok: false, error_code: 'unknown_type', error_message: 'unknown channel type', retryable: false);
             }
 
-            // A bound instance (tests bind a spy) takes precedence; otherwise
-            // build a live provider with the supplied config/secret.
+            // Always build the provider with the supplied config/secret. The
+            // provider classes are bound by AppServiceProvider, so a bare
+            // `app($providerClass)` resolves them with empty defaults and the
+            // transport reports `config_error` even though the channel is
+            // configured. Passing the overrides here is what makes the real
+            // config reach the provider. Tests bind a spy as a closure factory
+            // that ignores these overrides and returns the spy, so the same
+            // path still proves the controller routes through the provider
+            // contract.
             /** @var NotificationProvider $live */
-            $live = app()->bound($providerClass)
-                ? app($providerClass)
-                : app($providerClass, ['channelConfig' => $config, 'channelSecret' => $secret]);
+            $live = app($providerClass, ['channelConfig' => $config, 'channelSecret' => $secret]);
 
             return $live->send($payload);
         } catch (\Throwable $e) {

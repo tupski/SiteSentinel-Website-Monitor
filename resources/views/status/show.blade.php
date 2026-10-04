@@ -16,6 +16,19 @@
         ['value' => 1800, 'label' => __('30 minutes')],
         ['value' => 3600, 'label' => __('60 minutes')],
     ];
+    $banner = (string) $dto->banner;
+    $bannerTone = match ($banner) {
+        'Operational' => 'border-success/40 bg-success-muted/40 text-text',
+        'Degraded', 'Incident' => 'border-warning/40 bg-warning-muted/40 text-text',
+        'Partial Outage', 'Major Outage' => 'border-danger/40 bg-danger-muted/40 text-text',
+        default => 'border-border bg-surface-elevated text-text',
+    };
+    $bannerIcon = match ($banner) {
+        'Operational' => 'check-circle',
+        'Partial Outage', 'Major Outage', 'Incident' => 'x-circle',
+        default => 'exclamation-triangle',
+    };
+    $jsonUrl = route('status.json', ['statusPage' => $statusPage->slug]) . '?period=' . $dto->period;
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
@@ -38,7 +51,7 @@
              logic lives in app.js (`statusRefresh`), per AGENTS.md §7. --}}
         <div
             x-data="statusRefresh({
-                jsonUrl: @js(route('status.json', ['statusPage' => $statusPage->slug])),
+                jsonUrl: @js($jsonUrl),
                 updatedAt: @js($updatedAtIso),
                 allowedIntervals: @js(array_column($refreshIntervals, 'value')),
                 defaults: { enabled: false, interval: 60 },
@@ -103,26 +116,42 @@
         </div>
     </header>
 
-    <section aria-label="Overall status" class="mb-6 rounded border border-border bg-surface-elevated p-4">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-text-subtle">Current status</h2>
-        <p id="status-banner" class="mt-1 text-lg font-semibold text-text">{{ $dto->banner }}</p>
+    {{-- Overall status banner (dark, reference-style). --}}
+    <section aria-label="Overall status" class="mb-6 rounded-lg border p-4 shadow-sm {{ $bannerTone }}">
+        <div class="flex items-center gap-3">
+            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface/60">
+                <x-ui.icon :name="$bannerIcon" class="h-5 w-5" />
+            </span>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-text-subtle">{{ __('Current status') }}</p>
+                <p id="status-banner" class="text-lg font-semibold text-text">{{ $banner }}</p>
+            </div>
+        </div>
     </section>
 
-    <section aria-label="Services">
-        <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-text-subtle">Services</h2>
-        <ul id="status-services" class="divide-y divide-border rounded border border-border bg-surface-elevated">
-            @forelse($dto->services as $service)
-                <li class="flex items-center justify-between gap-4 p-4">
-                    <div>
-                        <p class="font-medium text-text">{{ $service['displayName'] }}</p>
-                        <p class="text-xs text-text-subtle">Updated {{ $service['dayBucket'] }}</p>
-                    </div>
-                    <p class="text-sm font-semibold text-text">{{ $service['publicLabel'] }}@if(isset($service['responseBand'])) <span class="ml-2 font-normal text-text-subtle">({{ $service['responseBand'] }})</span>@endif</p>
-                </li>
-            @empty
-                <li class="p-4 text-sm text-text-subtle">No services published.</li>
-            @endforelse
-        </ul>
+    {{-- Period filter (allowlisted enum; server-rendered links, no JS needed). --}}
+    <nav aria-label="{{ __('Reporting period') }}" class="mb-6 flex flex-wrap items-center gap-2">
+        @foreach ($periods as $value => $label)
+            <a href="{{ route('status.show', ['statusPage' => $statusPage->slug]) }}?period={{ $value }}"
+               @if ($value === $period) aria-current="page" @endif
+               class="rounded-full border px-3 py-1 text-sm {{ $value === $period
+                   ? 'border-primary bg-primary text-white'
+                   : 'border-border bg-surface-elevated text-text-muted hover:text-text' }}">
+                {{ __($label) }}
+            </a>
+        @endforeach
+        <span class="ml-auto inline-flex items-center gap-1 text-xs text-text-subtle">
+            <x-ui.icon name="chart-bar" class="h-4 w-4" />
+            {{ __($dto->periodLabel) }}
+        </span>
+    </nav>
+
+    <section aria-label="Services" class="space-y-4" id="status-services">
+        @forelse($dto->services as $service)
+            @include('status._service', ['service' => $service, 'dto' => $dto])
+        @empty
+            <p class="rounded border border-border bg-surface-elevated p-4 text-sm text-text-subtle">{{ __('No services published.') }}</p>
+        @endforelse
     </section>
 
     @if($historyEnabled)
@@ -136,6 +165,10 @@
             x-data="statusLocalTime({ iso: @js($parseable ? $updatedAtIso : '') })"
             x-text="display"
         >{{ $fallbackText }}</time>
+    </p>
+
+    <p class="mt-2 text-xs text-text-subtle">
+        {{ __('Availability is derived only from real persisted checks; nothing is estimated or fabricated.') }}
     </p>
 </main>
 </body>
