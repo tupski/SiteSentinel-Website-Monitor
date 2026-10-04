@@ -208,6 +208,10 @@ final class StatusPageHttpTest extends StatusPageTestCase
 
         $response->assertRedirect(route('admin.status-pages.edit', $page));
         $this->assertSame($page->id, $website->refresh()->status_page_id);
+        // Assignment must also publish the website: the projector filters on
+        // BOTH status_page_id and is_visible_on_status, so a bare assignment
+        // left the website invisible on every page (regression guard).
+        $this->assertTrue($website->refresh()->is_visible_on_status);
     }
 
     public function test_default_page_cannot_be_deleted(): void

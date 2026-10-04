@@ -12,6 +12,7 @@ use App\Jobs\RunWebsiteCheck;
 use App\Models\NotificationChannel;
 use App\Models\Website;
 use App\Services\Audit\AuditLogger;
+use App\Services\StatusPage\StatusPageCache;
 use App\Support\PerPage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,11 +20,17 @@ use Illuminate\View\View;
 
 /**
  * Monitored website CRUD (PLAN.md Phase 3).
+ *
+ * Every mutation that can change a projection input (name/alias, `is_active`,
+ * `is_visible_on_status`, cadence) invalidates the status-page projection cache
+ * so the public page never serves a stale row until the TTL expires
+ * (STATUS-PAGE.md §9.2).
  */
 final class WebsiteController extends Controller
 {
     public function __construct(
-        private readonly AuditLogger $audit
+        private readonly AuditLogger $audit,
+        private readonly StatusPageCache $statusPageCache,
     ) {}
 
     public function index(Request $request): View
@@ -57,6 +64,7 @@ final class WebsiteController extends Controller
         $this->syncChannels($website, $validated['channel_ids'] ?? null);
 
         $this->audit->log('website.created', $request->user(), $website);
+        $this->statusPageCache->invalidate();
 
         return redirect()
             ->route('admin.websites.index')
@@ -83,6 +91,11 @@ final class WebsiteController extends Controller
         $this->syncChannels($website, $validated['channel_ids'] ?? null);
 
         $this->audit->log('website.updated', $request->user(), $website);
+        // A website edit can change every projection input the page reads
+        // (name/alias, is_active, is_visible_on_status, cadence). Bust the
+        // cached projection so the public page cannot serve a stale row
+        // (STATUS-PAGE.md §9.2).
+        $this->statusPageCache->invalidate();
 
         return redirect()
             ->route('admin.websites.index')
@@ -94,6 +107,10 @@ final class WebsiteController extends Controller
         $this->audit->log('website.deleted', $request->user(), $website);
 
         $website->delete();
+
+        // Removing a website must drop it from the public page immediately,
+        // not at the TTL (STATUS-PAGE.md §9.2).
+        $this->statusPageCache->invalidate();
 
         return redirect()
             ->route('admin.websites.index')
@@ -110,6 +127,10 @@ final class WebsiteController extends Controller
         $this->audit->log('website.toggled', $request->user(), $website, [
             'is_active' => $website->is_active,
         ]);
+
+        // `is_active` gates publication (StatusProjector::publishedQuery), so
+        // toggling monitoring on/off must refresh the cached projection.
+        $this->statusPageCache->invalidate();
 
         return redirect()
             ->route('admin.websites.index')
@@ -173,6 +194,8 @@ final class WebsiteController extends Controller
             $website->delete();
         }
 
+        $this->statusPageCache->invalidate();
+
         return redirect()
             ->route('admin.websites.index')
             ->with('status', trans_choice(
@@ -194,16 +217,24 @@ final class WebsiteController extends Controller
                 ->with('status', __('No websites selected.'));
         }
 
+        $changed = false;
+
         foreach ($websites as $website) {
             if ($website->is_active === $active) {
                 continue; // idempotent: already in the requested state
             }
 
             $website->update(['is_active' => $active]);
+            $changed = true;
 
             $this->audit->log('website.toggled', $request->user(), $website, [
                 'is_active' => $active,
             ]);
+        }
+
+        if ($changed) {
+            // `is_active` gates publication (StatusProjector::publishedQuery).
+            $this->statusPageCache->invalidate();
         }
 
         return redirect()

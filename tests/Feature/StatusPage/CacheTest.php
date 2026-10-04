@@ -7,6 +7,7 @@ namespace Tests\Feature\StatusPage;
 use App\Models\Check;
 use App\Models\StatusPage;
 use App\Services\Incidents\IncidentEngine;
+use App\Services\StatusPage\PublicStatusDTO;
 use App\Services\StatusPage\StatusPageCache;
 use Illuminate\Support\Facades\Cache;
 
@@ -135,6 +136,40 @@ final class CacheTest extends StatusPageTestCase
         $this->makeWebsite(['check_interval_seconds' => 30]);
 
         $this->assertSame(60, $this->cache()->ttl($this->defaultPage()));
+    }
+
+    /**
+     * Regression: the array cache store (`serialize => false`) hid a fatal on
+     * every other store. `config('cache.serializable_classes')` is `false`
+     * (Laravel's gadget-chain default), so caching the DTO object made a
+     * serializing store return `__PHP_Incomplete_Class` and `remember()` threw
+     * a `TypeError` on the second request (STATUS-PAGE.md §9).
+     */
+    public function test_remember_round_trips_through_a_serializing_store(): void
+    {
+        $this->makeWebsite([
+            'status_alias' => 'Alpha',
+            'status_availability' => 'UP',
+            'status_security' => 'OK',
+        ]);
+
+        // The production default is `database`, which serializes values.
+        config(['cache.default' => 'database']);
+        Cache::store('database')->flush();
+
+        $page = $this->defaultPage();
+
+        $first = $this->cache()->remember($page);
+        $this->assertInstanceOf(PublicStatusDTO::class, $first);
+
+        // A cache hit reads a serialized value back; it must still be a DTO.
+        $second = $this->cache()->remember($page);
+        $this->assertInstanceOf(PublicStatusDTO::class, $second);
+        $this->assertSame($first->toArray(), $second->toArray());
+        $this->assertSame('Operational', $second->banner);
+        $this->assertSame(['Alpha'], array_column($second->services, 'displayName'));
+
+        Cache::store('database')->flush();
     }
 
     public function test_projection_is_cached_and_reused(): void

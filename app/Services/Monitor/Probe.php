@@ -131,10 +131,14 @@ final class Probe
         $host = parse_url($url, PHP_URL_HOST);
         $port = parse_url($url, PHP_URL_PORT) ?? (str_starts_with($url, 'https') ? 443 : 80);
 
+        // Only connection-pinning options belong here: Guzzle's cURL handler
+        // rejects any raw CURLOPT_* outside its built-in allow-list, and the
+        // stream handler rejects the "curl" array outright. `CURLOPT_RESOLVE`
+        // is allow-listed (SSRF pinning); the response-size cap is enforced
+        // post-download by `boundedBody()` (SECURITY.md §6 / FR-38).
         return $this->http
             ->withOptions([
                 'curl' => [
-                    CURLOPT_MAXFILESIZE => $bodyLimit,
                     CURLOPT_RESOLVE => ["{$host}:{$port}:{$ip}"],
                 ],
             ])

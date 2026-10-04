@@ -1,5 +1,129 @@
 # Changelog
 
+## [2026-10-04] — KR still missing from the status page: website CRUD never invalidated the projection (Phase 3/11)
+
+### Fixed
+
+- **Editing / toggling / deleting a website did not invalidate the cached status-page
+  projection.** [`app/Http/Controllers/Admin/WebsiteController.php`](app/Http/Controllers/Admin/WebsiteController.php)
+  mutated `websites` rows (including `is_active`, which gates publication, and `name`/`status_alias`)
+  without ever busting [`StatusPageCache`](app/Services/StatusPage/StatusPageCache.php). The
+  projector reads those live columns but the public page serves the cached DTO until the TTL
+  (`max(60, shortest published check_interval_seconds)`), so a re-published or edited website could
+  stay hidden — or stale — for a whole interval. Every write path (`store`, `update`, `destroy`,
+  `toggle`, `bulkDelete`, `bulkUpdateActive`) now calls `StatusPageCache::invalidate()` after the
+  mutation (STATUS-PAGE.md §9.2). Regression:
+  [`tests/Feature/StatusPage/WebsiteMutationInvalidationTest.php`](tests/Feature/StatusPage/WebsiteMutationInvalidationTest.php)
+  asserts the projection key changes on update/toggle/delete/bulk-delete and that a row published
+  from the website screen reappears on the page.
+
+### Notes (data + operations)
+
+- The operator's **KR** row (`websites.id = 1`) was still `is_visible_on_status = 0` — it was
+  assigned to the default page (`status_page_id = 1`) before the previous publication fix, so the
+  projector's `publishedQuery()` (which requires `is_active = 1` **and** `is_visible_on_status = 1`)
+  excluded it and the page rendered `services: []`. The row's publication flag was corrected to
+  `1`; re-selecting it on `/admin/status-pages/{default}/edit` (or saving it from the website
+  screen) now keeps it published **and** refreshes the cache.
+- KR's open incident (`incidents.id = 1`, `type = security`, `severity = CRITICAL`,
+  `status = DETECTED`, `resolved_at = NULL`) was always counted by `StatusProjector::openSeverities()`;
+  it simply had no *published* website to attribute to. Once published, the label derived from
+  `websites.status_availability = UP` + `status_security = INCIDENT` is **`Incident`** (banner
+  `Incident`). The label showed **`Unknown`** only while the worker was down: `last_checked_at` aged
+  past `max(2 × 300, 300) = 600 s`, and §6.4 pins stale rows to `Unknown`. A running worker
+  (`php artisan queue:work redis --queue=monitoring,notifications,maintenance,default --sleep=3`)
+  keeps the row fresh and the label correct.
+
+## [2026-10-04] — Manual check queued but nothing happened: probe crash + status visibility (Phase 4/8/11)
+
+### Fixed
+
+- **Every real check failed with `REQUEST_ERROR` before any network I/O.**
+  [`app/Services/Monitor/Probe.php`](app/Services/Monitor/Probe.php) passed
+  `CURLOPT_MAXFILESIZE` inside the Laravel HTTP client's `'curl'` option array. Guzzle's
+  cURL handler rejects any raw option outside its built-in allow-list
+  (`Passing CURLOPT_MAXFILESIZE (114) in the "curl" request option is not supported …`),
+  and the stream handler rejects the whole `'curl'` array, so no request was ever sent.
+  The check row was still persisted as `availability_state = DOWN`, `error_type = REQUEST_ERROR`,
+  which is why a completed job produced no usable result. `CURLOPT_RESOLVE` (SSRF IP pinning)
+  is allow-listed and retained; the 2 MB response cap is enforced post-download by
+  `Probe::boundedBody()` (SECURITY.md §6 / FR-38), so removing the option is byte-for-byte
+  equivalent. Regression: [`tests/Unit/Services/Monitor/ProbeTest.php`](tests/Unit/Services/Monitor/ProbeTest.php)
+  `test_probe_curl_options_are_accepted_by_guzzle_handler` replays the captured options through
+  the real `GuzzleHttp\Handler\CurlFactory` — the fake transport used by every other probe test
+  bypassed this validation, which is why the bug shipped green.
+- **Assigning a website to a status page left it invisible on every page.**
+  [`app/Http/Controllers/Admin/StatusPageController.php`](app/Http/Controllers/Admin/StatusPageController.php)
+  `syncWebsites()` set `status_page_id` but never `is_visible_on_status`, and the projector
+  filters on **both** (`StatusProjector::publishedQuery`). Multi-page assignment now also sets
+  `is_visible_on_status = true`. Regression: [`tests/Feature/StatusPage/StatusPageHttpTest.php`](tests/Feature/StatusPage/StatusPageHttpTest.php)
+  `test_admin_update_can_assign_websites_to_a_page` now asserts the publication flag.
+
+### Notes (operations)
+
+- The reported "Check queued for … but nothing happens" was **three stacked defects**: (1) no
+  queue worker was running (jobs accumulated in the Redis `queues:default` list — 29 stuck, zero
+  drained), (2) the probe crash above made any drained job useless, and (3) the status page never
+  reflected the website because it was never published. Run a supervised worker:
+  `php artisan queue:work redis --queue=monitoring,notifications,maintenance,default --sleep=3 --tries=3`
+  (README §6), and `php artisan queue:restart` after every deploy.
+
+### Verification
+
+- `php artisan test` — **669 passed** (4073 assertions).
+- Live end-to-end: a dispatched `RunWebsiteCheck` drained by a real worker now records
+  `http_status = 200`, `availability = UP`, `error_type = NULL`, real title/resolved IP
+  (previous run: `error_type = REQUEST_ERROR`).
+
+## [2026-10-04] — README: scheduler setup for aaPanel & FlyEnv + manual-check URL (Phase 10)
+
+### Added
+
+- [`README.md`](README.md) §7.10 — **aaPanel** cron walkthrough (Shell Script task, 1-minute cycle,
+  `/www/server/php/84/bin/php` absolute binary, run-as-user + `storage`/`bootstrap/cache` permission
+  note, panel-PHP path pitfall).
+- [`README.md`](README.md) §7.11 — **Windows FlyEnv** (PhpWebStudy) walkthrough: the built-in **Cron**
+  tool per-minute task and the FlyEnv-PHP-with-Task-Scheduler alternative, plus a persistent
+  `schedule:work` service note and the Windows queue-worker reminder.
+- [`README.md`](README.md) §7.12 — **Running a check manually**: the admin UI URL
+  `POST /admin/websites/{website}/check` (CSRF + `auth`/`admin` + `throttle:30,1`, queues only) and the
+  CLI `php artisan sentinel:check-website {website}`. Documents that both only queue `RunWebsiteCheck`
+  (AGENTS.md §9 — no inline probe) and how to drain the `monitoring` queue.
+
+### Changed
+
+- [`README.md`](README.md) §7 intro table now lists aaPanel + FlyEnv; added a platform-anchor index.
+- [`README.md`](README.md) §9 step 3 links the manual-check URL/CLI to §7.12.
+- [`README.md`](README.md) §11 troubleshooting: the scheduler-not-firing list now names aaPanel and
+  FlyEnv and links their setup sections.
+
+## [2026-10-04] — Status-page projection cache: store array, not object (Phase 8/11)
+
+### Fixed
+
+- **`TypeError` on every `/status/{slug}` hit with a serializing cache store.** `config/cache.php`
+  ships Laravel's hardened default `'serializable_classes' => false` (gadget-chain defense), so a
+  cached PHP object is unserialized as `__PHP_Incomplete_Class`. `StatusPageCache::remember()` cached
+  the `PublicStatusDTO` **object**, so the second request threw
+  `Return value must be of type PublicStatusDTO, __PHP_Incomplete_Class returned`
+  ([`app/Services/StatusPage/StatusPageCache.php`](app/Services/StatusPage/StatusPageCache.php),
+  [`app/Services/StatusPage/PublicStatusDTO.php`](app/Services/StatusPage/PublicStatusDTO.php)).
+  The suite hid it because `phpunit.xml` forces the `array` store (`serialize => false`).
+- `StatusPageCache::remember()` now caches `PublicStatusDTO::toArray()` — the plain allowlist array —
+  and rehydrates via the new `PublicStatusDTO::fromArray()`. The artefact stays "DTO only, never raw
+  rows" (STATUS-PAGE.md §9.1) and the redaction boundary is unchanged: only `banner`, `services[]`,
+  `updatedDayBucket` are ever stored. No change to `cache.serializable_classes` (security default kept).
+
+### Added
+
+- [`tests/Feature/StatusPage/CacheTest.php`](tests/Feature/StatusPage/CacheTest.php) —
+  `test_remember_round_trips_through_a_serializing_store` forces the `database` store and asserts the
+  cache hit returns a real `PublicStatusDTO` with identical content. Fails before the fix.
+
+### Verification
+
+- `php artisan test --filter="CacheTest|StatusPageHttpTest|RedactionRegressionTest"` — **39 passed**.
+
 ## [2026-10-04] — Final verification pass (Phase 7)
 
 ### Fixed

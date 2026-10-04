@@ -7,6 +7,8 @@ namespace Tests\Unit\Services\Monitor;
 use App\Models\Website;
 use App\Services\Monitor\Probe;
 use App\Services\Security\SsrfGuard;
+use GuzzleHttp\Handler\CurlFactory;
+use GuzzleHttp\Psr7\Request;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -161,5 +163,48 @@ final class ProbeTest extends TestCase
 
         $this->assertFalse($result->success);
         $this->assertSame('SSRF_BLOCKED', $result->errorType);
+    }
+
+    /**
+     * Regression: the Probe must only ever pass cURL options Guzzle's handlers
+     * accept. A raw CURLOPT_MAXFILESIZE in the "curl" option array is outside
+     * Guzzle's built-in allow-list (and the stream handler rejects the whole
+     * "curl" array), which made every real check fail with REQUEST_ERROR while
+     * Http::fake-driven tests stayed green. Replaying the captured options
+     * through the real CurlFactory reproduces the transport-level validation.
+     */
+    public function test_probe_curl_options_are_accepted_by_guzzle_handler(): void
+    {
+        $website = Website::factory()->make([
+            'url' => 'https://public.example.test/',
+            'follow_redirects' => false,
+        ]);
+        $website->id = 1;
+
+        SsrfGuard::setResolver(fn () => ['1.2.3.4']);
+
+        $captured = [];
+        Http::fake(function ($request, $options) use (&$captured) {
+            $captured = $options;
+
+            return Http::response('<title>OK</title>', 200);
+        });
+
+        $probe = new Probe(config('sentinel.probe_limits'), app(HttpFactory::class));
+        $result = $probe->probe($website);
+
+        $this->assertTrue($result->success);
+        $this->assertArrayHasKey('curl', $captured);
+
+        // Throws InvalidArgumentException if any option is outside the allow-list.
+        (new CurlFactory(1))->create(
+            new Request('GET', 'https://public.example.test/'),
+            ['curl' => $captured['curl']],
+        );
+
+        $this->assertSame(
+            ['public.example.test:443:1.2.3.4'],
+            $captured['curl'][CURLOPT_RESOLVE] ?? null,
+        );
     }
 }

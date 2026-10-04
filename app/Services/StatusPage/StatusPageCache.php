@@ -28,10 +28,15 @@ final class StatusPageCache
         $ttl = $this->ttl($page);
         $key = $this->key($page);
 
-        /** @var PublicStatusDTO $dto */
-        $dto = Cache::remember($key, $ttl, fn (): PublicStatusDTO => $this->projector->project($page));
+        // Store the DTO's plain allowlist array, never the object. Laravel's
+        // `cache.serializable_classes` defaults to false (gadget-chain defense),
+        // so a serializing store (database/file/redis) would hand back a
+        // `__PHP_Incomplete_Class` for a cached object. The array form survives
+        // any store and is still "DTO only, never raw rows" (STATUS-PAGE.md §9).
+        /** @var array{banner: string, services: array<int, mixed>, updatedDayBucket: string} $payload */
+        $payload = Cache::remember($key, $ttl, fn (): array => $this->projector->project($page)->toArray());
 
-        return $dto;
+        return PublicStatusDTO::fromArray($payload);
     }
 
     public function invalidate(?StatusPage $page = null): void

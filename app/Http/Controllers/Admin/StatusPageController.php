@@ -185,8 +185,15 @@ final class StatusPageController extends Controller
             ? []
             : Website::query()->whereIn('id', $ids)->pluck('id')->all();
 
+        // Selecting a website on a page both assigns it (status_page_id) and
+        // publishes it (is_visible_on_status). The projection filters on BOTH
+        // (StatusProjector::publishedQuery), so assigning without publishing
+        // left the website invisible on every page (STATUS-PAGE.md §4).
         if ($valid !== []) {
-            Website::query()->whereIn('id', $valid)->update(['status_page_id' => $page->id]);
+            Website::query()->whereIn('id', $valid)->update([
+                'status_page_id' => $page->id,
+                'is_visible_on_status' => true,
+            ]);
         }
 
         // Websites removed from the selection fall back to the default page.

@@ -537,8 +537,10 @@ The Laravel scheduler drives the whole monitoring plane. Its wiring lives in [`r
 
 | Approach | Entry point | When to use |
 | --- | --- | --- |
-| **Cron / platform scheduler** | `php artisan schedule:run` every 60 seconds | Bare-metal Linux, macOS, Windows, cPanel, Plesk, DirectAdmin |
+| **Cron / platform scheduler** | `php artisan schedule:run` every 60 seconds | Bare-metal Linux, macOS, Windows, cPanel, Plesk, DirectAdmin, aaPanel, FlyEnv |
 | **Long-running process** | `php artisan schedule:work` | A container/service that stays up (Docker `scheduler` service, systemd unit) |
+
+Platform-specific walkthroughs follow: Linux [§7.2](#72-linux--bare-metal--systemd-host), macOS [§7.3](#73-macos--launchd-or-crontab), Windows Task Scheduler [§7.4](#74-windows--task-scheduler), cPanel [§7.5](#75-cpanel--cron-jobs-ui), Plesk [§7.6](#76-plesk--scheduled-tasks), DirectAdmin [§7.7](#77-directadmin--cron-jobs), Docker [§7.8](#78-docker--scheduler-as-a-compose-service), **aaPanel [§7.10](#710-aapanel--cron-linux-panel)**, **Windows FlyEnv [§7.11](#711-windows--flyenv-native-php)**, and **manual checks [§7.12](#712-running-a-check-manually-no-scheduler)**.
 
 `schedule:run` fires every task that is due at that moment and exits — it depends on an external clock. `schedule:work` runs the scheduler in-process on a one-minute loop and needs no cron. **Never run both** against the same deployment.
 
@@ -742,6 +744,77 @@ php artisan schedule:work
 
 It blocks and runs the scheduler on an internal one-minute loop — no external cron required. Choose it when there is exactly **one** instance of the app; choose `schedule:run` + cron (or the Compose `scheduler` service) when the process does not stay resident. **Never run `schedule:work` on more than one replica**, or tasks (notably the dispatch sweep) will run concurrently despite `withoutOverlapping`.
 
+### 7.10 aaPanel — Cron (Linux panel)
+
+aaPanel is a Linux control panel; its **Cron** module drives the standard `schedule:run` entry once per minute.
+
+1. Open the aaPanel web UI → **Cron** in the left menu.
+2. Click **Add Task**.
+3. Set:
+   - **Task Type:** *Shell Script*
+   - **Task Name:** `SiteSentinel Scheduler`
+   - **Execution Cycle:** *N Minutes* → **1** minute
+   - **Script Content:**
+     ```bash
+     cd /www/wwwroot/sitesentinel && /www/server/php/84/bin/php artisan schedule:run >> /dev/null 2>&1
+     ```
+     Substitute the real project path and the **absolute PHP 8.4 binary** shown by aaPanel's **App Store → PHP** (commonly `/www/server/php/84/bin/php`).
+4. Save. The task appears in the list; the **Log** button on its row shows the captured output.
+
+> **Run as the site owner.** aaPanel cron runs as `root` by default. A `storage`/`bootstrap/cache` permission error means the scheduler wrote files as the wrong user. Either set the task's run user to the PHP-FPM pool user (`www`), or `chown -R www:www storage bootstrap/cache` and re-run. Queue workers must run under the **same** user as the web server so they can read the queue and write logs.
+
+> **Path bug (aaPanel).** The panel uses its own bundled PHP, not the system `php`. Always paste the full path to the 8.4 binary; a bare `php artisan …` may resolve to a different version or fail outright.
+
+### 7.11 Windows — FlyEnv (native PHP)
+
+[FlyEnv](https://flyenv.com/) (formerly PhpWebStudy) runs PHP-FPM, MySQL, and Redis natively on Windows and includes a **Cron** tool that can invoke the scheduler. Two supported approaches:
+
+**Option A — FlyEnv Cron tool (per-minute task):**
+
+1. Open FlyEnv → **Cron** in the left sidebar → **Add**.
+2. Set:
+   - **Name:** `SiteSentinel Scheduler`
+   - **Cron expression:** `* * * * *` (every minute)
+   - **Shell / Command:**
+     ```bat
+     cd /d C:\inetpub\sitesentinel && php artisan schedule:run
+     ```
+     Point the command at the FlyEnv-managed PHP 8.4 binary if `php` is not on `PATH` (e.g. `"C:\Users\you\AppData\Roaming\FlyEnv\php\php-8.4\php.exe" artisan schedule:run`).
+3. Save and enable. FlyEnv streams the command output into its Cron log panel.
+
+**Option B — keep FlyEnv running the services, use Task Scheduler for the clock:** follow [§7.4 Windows — Task Scheduler](#74-windows--task-scheduler), pointing **Program/script** at the FlyEnv PHP binary and **Start in** at the project root.
+
+> **Persistent loop instead of cron (FlyEnv).** If the FlyEnv app stays resident, add a second FlyEnv **Service/Command** that runs `php artisan schedule:work` and keep it started. **Never run both** `schedule:run` (cron) and `schedule:work` against the same deployment — the dispatch sweep would run twice.
+
+> **Queue worker on Windows.** FlyEnv's PHP-FPM serves requests; the monitoring plane still needs a separate `php artisan queue:work` process ([§6](#6-queue-worker-setup)). Keep it alive with a FlyEnv Service or a Task Scheduler entry, and run `php artisan queue:restart` after every code change.
+
+### 7.12 Running a check manually (no scheduler)
+
+To verify the monitoring pipeline without waiting for the scheduler, trigger a check on demand. There are two paths; both only **queue** a `RunWebsiteCheck` job (AGENTS.md §9 — never an inline probe), so a worker must be running to drain it.
+
+**Option A — from the admin UI (URL):**
+
+1. Log in, open **Websites** (`GET /admin/websites`).
+2. Click the **Run check** action on the website's row. That button submits a CSRF-protected form:
+   ```text
+   POST /admin/websites/{website}/check
+   ```
+   It is rate-limited to **30 requests/minute** and requires `auth` + `admin`. A raw `curl` must therefore carry a valid session cookie and the CSRF token — prefer the button in the UI.
+3. The job lands on the `monitoring` queue. Watch it drain:
+   ```bash
+   php artisan queue:work redis --queue=monitoring --once
+   ```
+
+**Option B — from the CLI (bypasses the scheduler):**
+
+```bash
+php artisan sentinel:check-website {website}
+```
+
+`{website}` is the **website id** (the `websites.id` primary key). The command dispatches the same `RunWebsiteCheck` job and prints `Dispatched RunWebsiteCheck for website {id}`.
+
+> **Verify end-to-end:** after dispatching, a new `checks` row appears for the website; if a detection rule fires, an `incidents` row is created and the notification dispatcher runs ([§9](#9-post-install-verification) step 3). If no row appears, the worker is not draining the queue ([§11](#11-troubleshooting)) or `QUEUE_CONNECTION` is wrong.
+
 ---
 
 ## 8. Web server / TLS
@@ -810,7 +883,7 @@ Work through this list once after a fresh deployment.
    ```bash
    php artisan queue:work redis --queue=monitoring --once
    ```
-   A new **check** row and, if configured, an **incident** should appear shortly.
+   A new **check** row and, if configured, an **incident** should appear shortly. From the CLI you can instead dispatch by website id with `php artisan sentinel:check-website {id}` — see [§7.12](#712-running-a-check-manually-no-scheduler) for both the UI URL (`POST /admin/websites/{website}/check`) and the command.
 
 4. **Confirm a notification.** Add a channel under **Notifications** (Email or Telegram), use its **Test** button to verify the provider, then **Test-send** to deliver a labelled message through the queue. Inspect **Notification Logs** for the delivery record.
 
@@ -909,7 +982,7 @@ Notes:
 - **Verify the task is registered:** `php artisan schedule:list` should show `sitesentinel:dispatch-due-checks` running every minute.
 - **Prove it manually:** `php artisan schedule:run` and watch for output; then run the dispatcher logic by hand with `php artisan tinker` or by queueing a manual check from the UI.
 - **Docker:** confirm the `scheduler` service is up and check its logs. Do **not** add a second cron that races it.
-- **Windows/Plesk/cPanel/DirectAdmin:** re-check the task's PHP path and project path, and that the schedule is genuinely *every minute*.
+- **Windows/Plesk/cPanel/DirectAdmin/aaPanel/FlyEnv:** re-check the task's PHP path and project path, and that the schedule is genuinely *every minute* ([§7.10 aaPanel](#710-aapanel--cron-linux-panel), [§7.11 FlyEnv](#711-windows--flyenv-native-php)).
 
 ### Web push fails or never arrives
 

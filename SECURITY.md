@@ -317,9 +317,13 @@ another page's unlocked sessions. The legacy singleton keys (`status_page.unlock
 `status_page.settings_updated_at`, `status_page.version`) remain the default page's keys for
 backward compatibility. Redaction (§14.4) is enforced **per page and independently**.
 
-**Cache isolation (implemented).** Only the redacted `PublicStatusDTO` is cached
-(`status:projection:v1:{sha1(mode)}:{updated_at}`); no raw `websites`/`incidents` row is ever stored,
-so a cache read cannot surface an unprojected field. The cache key contains no row identifier.
+**Cache isolation (implemented).** Only the redacted projection is cached
+(`status:projection:v1:{sha1(slug)}:{page_id}:{updated_at}:{epoch}`); no raw `websites`/`incidents`
+row is ever stored, so a cache read cannot surface an unprojected field. The cache key contains no row
+identifier. The cache value is the DTO's plain allowlist **array** (`banner`, `services[]`,
+`updatedDayBucket`) — never a PHP object — so it round-trips under the hardened default
+`cache.serializable_classes = false` (`__PHP_Incomplete_Class` is impossible) while keeping the
+redaction boundary intact.
 
 **`noindex` (implemented).** Every status response sets `X-Robots-Tag: noindex, nofollow`; the views
 also emit `<meta name="robots" content="noindex, nofollow">`, and `public/robots.txt` disallows

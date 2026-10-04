@@ -675,17 +675,28 @@ made by `App\Http\Middleware\EnsureStatusVisibility` (applied to the status rout
 - Cache store is Redis at MVP ([`ARCHITECTURE.md`](ARCHITECTURE.md) §12); the `cache` table exists
   only as a framework fallback and is not the primary store ([`DATABASE.md`](DATABASE.md) §3.21).
 
-**Implemented behaviour (Phase 8, `ADR-029`).** `StatusPageCache::remember()` caches the
-`PublicStatusDTO` under key `{cache_prefix}:{sha1(visibility_mode)}:{updated_at}` with
-`cache_prefix = status:projection:v1` and TTL
+**Implemented behaviour (Phase 8, `ADR-029`; Phase 11, `ADR-031`).** `StatusPageCache::remember()`
+caches the `PublicStatusDTO` under key `{cache_prefix}:{sha1(slug)}:{page_id}:{updated_at}:{epoch}`
+with `cache_prefix = status:projection:v1` and TTL
 `max(ttl_floor, min(published check_interval_seconds))`, `ttl_floor = 60 s`. The key contains no
-website/row identifier — only the mode hash and the settings stamp — so it cannot be enumerated.
-`StatusPageCache::bust()` is called **post-commit** (failure-isolated, never breaking the write) from
-`IncidentEngine`, `IncidentStateMachine::apply()`, and the admin settings save; it forgets the keys
-for all three modes at the current settings stamp. The admin save also advances
-`status_page_settings.updated_at`, which rolls the key forward and immediately retires the old
-projection. **Cache isolation:** only the redacted DTO is stored — no raw `websites`/`incidents`
-row can ever be read back out of the cache (§9.1).
+website/row identifier — only the slug hash, page id and the settings stamp — so it cannot be
+enumerated. `StatusPageCache::bust()` is called **post-commit** (failure-isolated, never breaking the
+write) from `IncidentEngine`, `IncidentStateMachine::apply()`, the admin settings save, and every
+website CRUD mutation in [`Admin\WebsiteController`](app/Http/Controllers/Admin/WebsiteController.php)
+(`store`/`update`/`destroy`/`toggle`/`bulkDelete`/`bulkUpdateActive`) — a website edit changes the
+projection inputs (`name`/`status_alias`, `is_active`, `is_visible_on_status`, cadence) exactly as a
+page assignment does; it forgets the keys for all three modes at the current settings stamp. The
+admin save also advances `status_page_settings.updated_at`, which rolls the key forward and
+immediately retires the old projection. **Cache isolation:** only the redacted DTO is stored — no raw
+`websites`/`incidents` row can ever be read back out of the cache (§9.1).
+
+**Storage form (object vs array).** The cache stores `PublicStatusDTO::toArray()` — a plain
+`array{banner, services[], updatedDayBucket}` — and rehydrates the DTO with
+`PublicStatusDTO::fromArray()` on read. Laravel's `config('cache.serializable_classes')` defaults to
+`false` (a gadget-chain defense), so a cached **object** comes back as `__PHP_Incomplete_Class` from
+any serializing store (`database`/`file`/`redis`). The array form is store-agnostic and is still "DTO
+only, never raw rows". The `array` test store (`serialize => false`) does not exercise this path, so a
+regression test pins it against the `database` store.
 
 ### 9.3 Load considerations
 
@@ -803,6 +814,10 @@ server-side `UpdateStatusPageSettingsRequest` rejects `visibility_mode = Public`
 - All six routes are behind **auth + admin** ([`SECURITY.md`](SECURITY.md) §3).
 - A page is identified externally by its unique `slug`; the admin sets `name`, `slug`,
   `visibility_mode`, `password_hash` (optional), and `is_default`.
+- Selecting a website on a page publishes it: `syncWebsites()` sets **both**
+  `websites.status_page_id` **and** `websites.is_visible_on_status = true`, because the projector
+  filters on both (§4.7). Deselecting releases it (`status_page_id = NULL`), after which the site
+  appears only if the legacy singleton screen (§11.2) has published it.
 - Deleting a page MUST NOT delete websites: `websites.status_page_id` is `ON DELETE SET NULL`, so
   affected websites fall back to the default page.
 - Exactly one page SHOULD remain `is_default = 1`; the default page is the target of the legacy
