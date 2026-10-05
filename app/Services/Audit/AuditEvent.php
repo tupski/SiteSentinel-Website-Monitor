@@ -47,6 +47,10 @@ final class AuditEvent
 
     public const SETTINGS_CHANGED = 'settings.changed';
 
+    public const SETTINGS_PULLED = 'settings.pulled';
+
+    public const SETTINGS_ROLLED_BACK = 'settings.rolled_back';
+
     // --- Notification channels (SECURITY.md §9.1) ---
     public const CHANNEL_SECRET_UPDATED = 'channel.secret.updated';
 
@@ -82,6 +86,8 @@ final class AuditEvent
             self::INCIDENT_RESOLVED,
             self::RULE_CHANGED,
             self::SETTINGS_CHANGED,
+            self::SETTINGS_PULLED,
+            self::SETTINGS_ROLLED_BACK,
             self::CHANNEL_SECRET_UPDATED,
             self::CHANNEL_TESTED,
             self::STATUS_PAGE_VISIBILITY_CHANGED,

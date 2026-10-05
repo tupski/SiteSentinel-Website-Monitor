@@ -135,4 +135,57 @@ final class AdminDashboardTest extends TestCase
         $response->assertSeeInOrder(['Total websites', '4'], false);
         $response->assertSeeInOrder(['Operational', '2'], false);
     }
+
+    /**
+     * The Availability / Security & Content Health tables are capped at 10 rows
+     * regardless of fleet size, while the counters still reflect the full fleet.
+     */
+    public function test_availability_and_security_tables_are_capped_at_ten_items(): void
+    {
+        Website::factory()->count(12)->create();
+
+        $response = $this->actingAs(User::factory()->create())->get('/admin');
+        $response->assertOk();
+
+        $data = $response->getOriginalContent()->getData();
+
+        $this->assertCount(10, $data['websites'], 'the shared table collection must be capped at 10');
+        $this->assertSame(12, $data['websiteTotal'], 'the uncapped total must be exposed for the "View all" link');
+        $this->assertSame(12, $data['counters']['total'], 'the total counter must reflect the full fleet');
+    }
+
+    /** The "View all" links appear only when the fleet exceeds the 10-row cap. */
+    public function test_view_all_links_appear_only_when_more_than_ten_websites(): void
+    {
+        // Exactly ten: no "View all" affordance in either section.
+        Website::factory()->count(10)->create();
+
+        $html = html_entity_decode(
+            (string) $this->actingAs(User::factory()->create())->get('/admin')->getContent(),
+        );
+
+        $this->assertStringNotContainsString('View all availability', $html);
+        $this->assertStringNotContainsString('View all security & content health', $html);
+        $this->assertStringNotContainsString('View all security & content health', $html);
+
+        // One more row tips both sections over the cap.
+        Website::factory()->create();
+
+        $html = html_entity_decode(
+            (string) $this->actingAs(User::factory()->create())->get('/admin')->getContent(),
+        );
+
+        $this->assertStringContainsString('View all availability', $html);
+        $this->assertStringContainsString('View all security & content health', $html);
+
+        // Each link targets the correct related list page.
+        $this->assertStringContainsString(
+            'href="'.route('admin.websites.index', ['status' => 'UP']).'"',
+            $html,
+        );
+        $this->assertStringContainsString(
+            'href="'.route('admin.websites.index').'"',
+            $html,
+        );
+    }
 }

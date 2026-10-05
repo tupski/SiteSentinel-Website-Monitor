@@ -41,6 +41,7 @@ final class CsrfSessionTest extends SecurityTestCase
             'admin.incidents.acknowledge', 'admin.incidents.resolve',
             'admin.notifications.store', 'admin.notifications.update', 'admin.notifications.destroy',
             'admin.notifications.test-send', 'admin.notifications.test', 'admin.status-settings.update',
+            'admin.settings.update', 'admin.settings.pull', 'admin.settings.rollback',
             'admin.push.subscribe', 'admin.push.unsubscribe', 'admin.push.test',
             'status.unlock', 'status.logout',
         ];

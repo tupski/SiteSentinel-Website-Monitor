@@ -128,10 +128,16 @@
         <a href="{{ route('admin.notification-logs.index') }}" class="mt-3 inline-block text-sm text-text-muted underline hover:text-text">{{ __('Open delivery log') }}</a>
     </section>
 
+    {{-- Availability and Security & Content Health stay SEPARATE areas
+         (AGENTS.md §15.2). Both tables are already capped at 10 rows by the
+         controller; when the fleet is larger each section links to the full
+         list page. `:flush="true"` drops the nested bordered card so the
+         table's left edge aligns with the section heading (the section itself
+         already provides the border/padding). --}}
     <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section aria-labelledby="availability-heading" class="rounded-lg border border-border bg-surface-elevated p-6 shadow-sm">
             <h2 id="availability-heading" class="text-lg font-semibold text-text">{{ __('Availability') }}</h2>
-            <x-ui.table class="mt-3">
+            <x-ui.table class="mt-3" :flush="true">
                 <x-ui.table-head>
                     <tr class="text-left">
                         <th class="py-2">{{ __('Website') }}</th>
@@ -151,11 +157,16 @@
                     @endforelse
                 </x-ui.table-body>
             </x-ui.table>
+            @if (($websiteTotal ?? 0) > 10)
+                <x-ui.button :href="route('admin.websites.index', ['status' => 'UP'])" variant="ghost" size="sm" class="mt-3">
+                    {{ __('View all availability') }}
+                </x-ui.button>
+            @endif
         </section>
 
         <section aria-labelledby="security-heading" class="rounded-lg border border-border bg-surface-elevated p-6 shadow-sm">
             <h2 id="security-heading" class="text-lg font-semibold text-text">{{ __('Security & Content Health') }}</h2>
-            <x-ui.table class="mt-3">
+            <x-ui.table class="mt-3" :flush="true">
                 <x-ui.table-head>
                     <tr class="text-left">
                         <th class="py-2">{{ __('Website') }}</th>
@@ -175,6 +186,11 @@
                     @endforelse
                 </x-ui.table-body>
             </x-ui.table>
+            @if (($websiteTotal ?? 0) > 10)
+                <x-ui.button :href="route('admin.websites.index')" variant="ghost" size="sm" class="mt-3">
+                    {{ __('View all security & content health') }}
+                </x-ui.button>
+            @endif
         </section>
     </div>
 

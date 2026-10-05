@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Services\Settings\SettingsRepository;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -32,8 +33,10 @@ final class EnforceSessionTimeouts
             return $next($request);
         }
 
-        $idleMinutes = max(1, (int) config('sentinel.auth.idle_timeout_minutes', 30));
-        $absoluteMinutes = max(1, (int) config('sentinel.auth.absolute_timeout_minutes', 480));
+        // Read through the settings accessor (ADR-035, ADR-043) so an admin edit
+        // on the Settings page is applied; absent rows fall back to config.
+        $idleMinutes = max(1, (int) settings(SettingsRepository::AUTH_IDLE_TIMEOUT));
+        $absoluteMinutes = max(1, (int) settings(SettingsRepository::AUTH_ABSOLUTE_TIMEOUT));
 
         $now = now();
         $loginAt = $request->session()->get('auth.login_at');

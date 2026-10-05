@@ -472,16 +472,51 @@ Purpose: key/value application settings, encrypted where sensitive.
 
 Keys/indexes: PK `id`; `uq_settings_key` (`key`).
 
-**Phase 6 (ADR-035) — implemented.** Migration `0001_12_01_000000_create_settings_table.php` creates
-this table verbatim. `App\Services\Settings\SettingsRepository` is the only read/write surface: it owns
-the key registry (group, type, default resolver) and resolves a missing key to a config-derived default,
-so a missing row never breaks a read. `is_encrypted` is carried for forward compatibility but is **not**
-used at MVP — no secret is stored here (presentational/identity settings only).
+**Phase 6 (ADR-035) — implemented; ADR-043 — applied at runtime + categorized + versioned.**
+Migration `0001_12_01_000000_create_settings_table.php` creates this table verbatim.
+`App\Services\Settings\SettingsRepository` is the only read/write surface: it owns the key registry
+(group, type, default resolver, validation rules) and resolves a missing key to a config-derived
+default, so a missing row never breaks a read. `is_encrypted` is carried for forward compatibility but
+is **not** used at MVP — no secret is stored here (ADR-035 secret boundary).
 
-Canonical settings keys (examples): `retention.checks_days` (30, allowed 30/60/90),
-`retention.incidents_days` (365), `retention.notification_logs_days` (90),
-`retention.snapshots_days` (14), `scoring.threshold_info` (1), `scoring.threshold_warning` (8),
-`scoring.threshold_critical` (15), `scoring.correlation_guard` (2).
+**Every registered key is consumed at runtime** through this accessor (ADR-043): the
+`ApplySystemSettings` middleware applies timezone + branding; retention windows drive the
+`model:prune` schedules; scoring thresholds drive `RuleEngine`; the cooldown drives the notification
+dispatcher; monitoring thresholds drive `IncidentEngine`; the auth/session keys drive login throttling
+and session timeouts. A stored row wins; an absent row degrades to the config default.
+
+Canonical settings keys: `site_name`, `site_description`, `site_logo`, `favicon`, `timezone`,
+`monitoring.default_interval_seconds` (300), `monitoring.default_timeout_seconds` (10),
+`monitoring.consecutive_failures_threshold` (2),
+`incidents.availability_critical_after_failures` (6), `incidents.recovery_consecutive_checks` (2),
+`scoring.threshold_info` (1), `scoring.threshold_warning` (8), `scoring.threshold_critical` (15),
+`scoring.correlation_guard_min_categories` (2), `notifications.default_cooldown_minutes` (15),
+`retention.checks_days` (30, allowed 30/60/90), `retention.incidents_days` (365),
+`retention.notification_logs_days` (90), `retention.snapshots_days` (14),
+`auth.max_login_attempts` (5), `auth.soft_limit_window_minutes` (15), `auth.lockout_threshold` (10),
+`auth.lockout_window_minutes` (30), `auth.lockout_duration_minutes` (15),
+`auth.min_password_length` (12), `auth.idle_timeout_minutes` (30), `auth.absolute_timeout_minutes` (480).
+
+### 3.17.1 `setting_versions`
+
+Purpose: immutable snapshots of the settings map for pull/rollback version control (ADR-043).
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | BIGINT UNSIGNED | no | auto |
+| `version` | INT UNSIGNED | no | — |
+| `label` | VARCHAR(255) | yes | NULL |
+| `snapshot` | JSON | no | — |
+| `checksum` | VARCHAR(64) | no | — |
+| `source` | VARCHAR(32) | no | `save` |
+| `author_id` | BIGINT UNSIGNED | yes | NULL |
+| `created_at`/`updated_at` | TIMESTAMP | yes | NULL |
+
+Keys/indexes: PK `id`; `uq_setting_versions_version` (`version`); `idx_setting_versions_checksum`
+(`checksum`); `idx_setting_versions_created_at` (`created_at`); FK `author_id` → `users.id`
+ON DELETE SET NULL. Migration `0001_12_03_000000_create_setting_versions_table.php`. Rows are
+append-only; `checksum` is a sha256 over the canonical (ksort + json) map so identical states dedupe
+and tampering is detectable. `source` is `save` | `pull` | `rollback`.
 
 ### 3.18 `status_page_settings`
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Services\Settings\SettingsRepository;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Hash;
@@ -26,7 +27,7 @@ final class UpdatePasswordRequest extends FormRequest
      */
     private function minimumLength(): int
     {
-        return max(12, (int) config('sentinel.auth.min_password_length', 12));
+        return max(12, (int) settings(SettingsRepository::AUTH_MIN_PASSWORD_LENGTH));
     }
 
     public function authorize(): bool

@@ -69,6 +69,35 @@ final class SharedComponentsTest extends TestCase
         $html->assertSeeInOrder(['10', '20', '50', '100', 'All']);
     }
 
+    /**
+     * The table primitive defaults to its own bordered card (unchanged for every
+     * existing caller), and `flush` drops that nested card so a table inside a
+     * section aligns flush with the section content (incident detail sections).
+     */
+    public function test_x_ui_table_defaults_to_a_bordered_card(): void
+    {
+        $html = $this->blade(
+            '<x-ui.table><x-ui.table-body><tr><td>Cell</td></tr></x-ui.table-body></x-ui.table>'
+        );
+
+        $html->assertSee('overflow-hidden rounded-lg border border-border bg-surface-elevated shadow-sm', false);
+        $html->assertSee('overflow-x-auto', false);
+    }
+
+    public function test_x_ui_table_flush_omits_the_nested_card(): void
+    {
+        $html = $this->blade(
+            '<x-ui.table :flush="true"><x-ui.table-body><tr><td>Cell</td></tr></x-ui.table-body></x-ui.table>'
+        );
+
+        $raw = (string) $html;
+
+        // No nested bordered card, but the scroll container (and the table) remain.
+        $this->assertStringNotContainsString('overflow-hidden rounded-lg border border-border', $raw);
+        $html->assertSee('overflow-x-auto', false);
+        $html->assertSee('<table', false);
+    }
+
     public function test_x_theme_switcher_renders_three_states(): void
     {
         $html = $this->blade('<x-theme-switcher />');

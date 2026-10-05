@@ -5,8 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     {{-- Phase 4: render the component `title` slot into <title> (the legacy
-         `@yield('title')` never received it). Falls back to the default. --}}
-    <title>{{ isset($title) ? $title : 'SiteSentinel — Admin' }}</title>
+         `@yield('title')` never received it). Falls back to the default.
+         `$siteName` is shared by ApplySystemSettings (ADR-043); the literal
+         fallback keeps component-only renders working. --}}
+    @php($appName = $siteName ?? config('app.name', 'SiteSentinel'))
+    <title>{{ isset($title) ? $title : $appName.' — Admin' }}</title>
+    @if (! empty($faviconUrl))
+        <link rel="icon" href="{{ $faviconUrl }}">
+    @endif
     @include('partials.theme-bootstrap')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
@@ -74,10 +80,14 @@
                         </svg>
                     </button>
 
-                    {{-- Brand / page area. --}}
+                    {{-- Brand / page area. Reflects the stored site name / logo
+                         (ADR-043); falls back to config when unset. --}}
                     <a href="{{ route('admin.dashboard') }}"
-                       class="shrink-0 text-base font-bold tracking-tight text-text rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-                        {{ __('SiteSentinel') }}
+                       class="flex shrink-0 items-center gap-2 text-base font-bold tracking-tight text-text rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                        @if (! empty($siteLogoUrl))
+                            <img src="{{ $siteLogoUrl }}" alt="" class="h-6 w-auto" aria-hidden="true">
+                        @endif
+                        <span>{{ $appName }}</span>
                     </a>
 
                     <div class="min-w-0 flex-1"></div>

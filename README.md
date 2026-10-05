@@ -1001,6 +1001,19 @@ Notes:
 
 ## 12. Documentation index
 
+### In-app operator guide
+
+The application ships an admin-only operator guide at **`GET /admin/documentation`** (`admin.documentation`).
+It renders in a dedicated, standalone docs shell (separate from the admin app shell) modelled on the Laravel
+framework docs: a grouped left sidebar, a centred content column with `#` anchored headings and a right
+"On this page" table of contents, plus a header search, version selector and theme toggle. The layout is
+**3 columns** on wide screens (`xl`: sidebar + content + TOC), **2 columns** on tablet (`lg`: sidebar +
+content) and a **single column** on mobile, where the sidebar and TOC live in an off-canvas drawer. The
+grouped navigation and the sections it links to are driven by [`config/documentation.php`](config/documentation.php),
+so navigation and content cannot drift apart.
+
+### Authoritative specifications
+
 The authoritative specifications — read the relevant one before changing behaviour (AGENTS.md §1 prescribes the order):
 
 | Document | Contents |

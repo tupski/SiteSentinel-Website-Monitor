@@ -21,15 +21,18 @@ class SettingSeeder extends Seeder
 {
     public function run(): void
     {
-        $defaults = [
-            SettingsRepository::SITE_NAME => (string) config('app.name', 'SiteSentinel'),
-            SettingsRepository::TIMEZONE => (string) config('app.timezone', 'UTC'),
-        ];
+        foreach (SettingsRepository::keys() as $key) {
+            $value = SettingsRepository::defaultFor($key);
 
-        foreach ($defaults as $key => $value) {
+            // Null defaults (e.g. the optional branding assets) are left
+            // unseeded so the row is absent and the default resolver applies.
+            if ($value === null || $value === '') {
+                continue;
+            }
+
             Setting::query()->firstOrCreate(
                 ['key' => $key],
-                ['value' => $value, 'is_encrypted' => false],
+                ['value' => is_scalar($value) ? (string) $value : json_encode($value), 'is_encrypted' => false],
             );
         }
     }

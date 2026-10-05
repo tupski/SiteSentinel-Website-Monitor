@@ -23,7 +23,7 @@ namespace App\Services\StatusPage;
 final class PublicStatusDTO implements \JsonSerializable
 {
     /**
-     * @param  array<int, array{opaqueIndex: string, displayName: string, publicLabel: string, dayBucket: string, sortIndex: int, responseBand?: string, uptime?: array{available: bool, percent: float|null, up: int, down: int, total: int}, history?: list<array{label: string, value: float, up: int, total: int}>}>  $services
+     * @param  array<int, array{opaqueIndex: string, displayName: string, publicLabel: string, dayBucket: string, sortIndex: int, responseBand?: string, responseMs?: int, checkedAt?: string, uptime?: array{available: bool, percent: float|null, up: int, down: int, total: int}, history?: list<array{label: string, value: float, up: int, total: int}>}>  $services
      */
     public function __construct(
         public readonly string $banner,
@@ -47,7 +47,7 @@ final class PublicStatusDTO implements \JsonSerializable
      */
     public static function fromArray(array $data): self
     {
-        /** @var array<int, array{opaqueIndex: string, displayName: string, publicLabel: string, dayBucket: string, sortIndex: int, responseBand?: string, uptime?: array{available: bool, percent: float|null, up: int, down: int, total: int}, history?: list<array{label: string, value: float, up: int, total: int}>}> $services */
+        /** @var array<int, array{opaqueIndex: string, displayName: string, publicLabel: string, dayBucket: string, sortIndex: int, responseBand?: string, responseMs?: int, checkedAt?: string, uptime?: array{available: bool, percent: float|null, up: int, down: int, total: int}, history?: list<array{label: string, value: float, up: int, total: int}>}> $services */
         $services = is_array($data['services'] ?? null) ? array_values($data['services']) : [];
 
         $period = PublicStatusPeriod::resolve($data['period'] ?? null);

@@ -99,11 +99,18 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'session.timeouts', 
     Route::put('profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::put('profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
 
-    // Phase 6 (ADR-035): system settings — site identity, branding, timezone.
-    // Fixed key whitelist + registered-only writes: no infrastructure secret is
-    // writable here. Admin-only via the group's `auth` + `session.timeouts` + `admin`.
+    // Phase 6 (ADR-035) / ADR-043: system settings — site identity, branding,
+    // timezone and operational tuning. Registry-derived key whitelist +
+    // registered-only writes: no infrastructure secret is writable here.
+    // Admin-only via the group's `auth` + `session.timeouts` + `admin`.
+    // Version control: pull (reconcile to upstream/latest) and rollback (restore
+    // a snapshot) are POST/PUT (state-changing, CSRF-protected). The literal
+    // `pull` segment is registered before `{settingVersion}` so it can never be
+    // read as a version id.
     Route::get('settings', [SystemSettingController::class, 'edit'])->name('settings.edit');
     Route::put('settings', [SystemSettingController::class, 'update'])->name('settings.update');
+    Route::post('settings/pull', [SystemSettingController::class, 'pull'])->name('settings.pull');
+    Route::post('settings/versions/{settingVersion}/rollback', [SystemSettingController::class, 'rollback'])->name('settings.rollback');
 
     // Phase 11 (ADR-031): multi-page CRUD. Delete is guarded in the controller
     // (never the last/default page; websites fall back via ON DELETE SET NULL).

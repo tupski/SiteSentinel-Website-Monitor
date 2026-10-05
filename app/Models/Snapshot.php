@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -100,7 +101,7 @@ final class Snapshot extends Model
     public function prunable(): Builder
     {
         $fallbackCutoff = now()->subDays(
-            max(1, (int) config('sentinel.retention.snapshots_days', 14))
+            max(1, (int) settings(SettingsRepository::RETENTION_SNAPSHOTS_DAYS))
         );
 
         return self::query()

@@ -6,6 +6,7 @@ namespace App\Http\Requests;
 
 use App\Models\StatusPage;
 use App\Models\StatusPageSetting;
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -22,7 +23,7 @@ final class UpdateStatusPageSettingsRequest extends FormRequest
      */
     public function rules(): array
     {
-        $minPassword = max(12, (int) config('sentinel.auth.min_password_length', 12));
+        $minPassword = max(12, (int) settings(SettingsRepository::AUTH_MIN_PASSWORD_LENGTH));
 
         return [
             'visibility_mode' => ['required', Rule::in([

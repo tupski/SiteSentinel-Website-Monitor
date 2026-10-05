@@ -1386,3 +1386,53 @@ tests (`AdminDashboardTest`, `DashboardHealthTest`, `IncidentHttpTest`, `Website
 filtered pages are bookmarkable/refreshable and survive pagination/`per_page` because
 `withQueryString()` is retained. No schema, dependency, or authorization change — all destinations
 remain inside the `auth` + `session.timeouts` + `admin` route group.
+
+---
+
+## ADR-043: Settings are applied at runtime through one accessor; categorized UI + DB-snapshot version control
+
+**Status** — Accepted (implemented)
+
+**Context** — ADR-035 shipped the `settings` table + `SettingsRepository` + the admin Settings page
+for site identity/branding/timezone, but **nothing consumed the stored values**: every runtime read
+(branding markup, timezone, retention windows, scoring thresholds, cooldowns, monitoring thresholds,
+auth/session tuning) still read `config()`/literals. The result was the reported bug — changing a
+setting saved successfully but had no effect. Separately, the page exposed only five keys and offered
+no way to recover a known-good state.
+
+**Decision** —
+
+- **One accessor, everywhere.** Every runtime consumer reads through `SettingsRepository` (directly or
+  via the `settings()` helper). A stored row wins; an absent row degrades to the same config-derived
+  default, so a fresh install behaves exactly as before. The repository's per-request memo is now
+  **version-aware**, so a long-lived queue worker observes an edit made in a web request without a
+  restart; `flush()` still bumps the version counter (O(1) invalidation, tagless-store safe).
+- **A runtime applier.** New `ApplySystemSettings` web middleware applies the stored timezone to PHP +
+  Carbon and shares site name/description/logo/favicon with all views (the layouts, sidebar and login
+  page render them instead of the hardcoded `SiteSentinel`). It restores the prior timezone on
+  `terminate()` and never throws (a settings failure must not 500 a page).
+- **Categorized UI driven by the registry.** `SettingsRepository` owns `group`/`field`/`label`/`help`/
+  `rules` per key; the page renders one card per group (General, Branding, System, Monitoring &
+  checks, Detection & scoring, Notifications, Retention & data, Security) and the request derives its
+  rules from the same registry, so the page, the form and the key set cannot drift.
+- **DB-snapshot version control.** New `setting_versions` table stores immutable full-map snapshots
+  (`version`, `label`, `snapshot` JSON, `checksum`, `source`, `author_id`). `SettingsVersionService`
+  snapshots on every save and powers **pull update** and **rollback**. Pull reconciles to a configured
+  local upstream file (`sentinel.settings.upstream_path`) or the latest stored snapshot, falling back
+  to config defaults; it makes **no outbound call** (AC-23, no telemetry). Both pull and rollback
+  snapshot the current state first, so no data is destroyed without a recovery point, and both emit
+  canonical audit events (`settings.pulled`, `settings.rolled_back`).
+
+**Alternatives considered** — (B) a git-based pull/rollback (rejected: the app is a self-hosted
+single-VPS deployment with no guaranteed git remote or working tree, and shelling out to git from a
+web request is an injection/availability risk); (C) an outbound "check for updates" endpoint
+(rejected: violates the no-telemetry constraint, PRD AC-23); keeping the flat five-field page
+(rejected: it hid the operational knobs the app actually reads and gave no recovery path).
+
+**Consequences** — *Positive:* the reported bug is fixed and regression-tested; every setting exposed
+in the UI is consumed (verified by tests); operators can recover a known-good state; no new runtime
+dependency; the registry is the single source of truth. *Negative:* the settings surface is now larger
+(24 keys) and each new key must declare its group/rules; "pull update" is intentionally local-only and
+must be documented as such (see CHANGELOG notes).
+
+**Related** — ADR-035; [`SECURITY.md`](SECURITY.md) §9.1; PRD AC-23; `tests/Feature/Admin/SystemSettingsTest.php`.

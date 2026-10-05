@@ -224,3 +224,200 @@
         }
     }
 }
+
+/* ---------------------------------------------------------------------------
+ * Documentation shell (Laravel-framework-docs style).
+ *
+ * Consumes the same semantic tokens as the rest of the app, so the docs are
+ * correct in light and dark mode with no `dark:` duplication. Nothing here is
+ * app-shell specific: the docs page renders its own layout component.
+ * ------------------------------------------------------------------------- */
+
+.docs-section {
+    /* Sticky-header offset for in-page `#anchor` jumps (h-16 header + breathing). */
+    scroll-margin-top: 5.5rem;
+    padding-bottom: 1.75rem;
+    margin-bottom: 1.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.docs-section:last-child {
+    border-bottom: 0;
+}
+
+.docs-article {
+    max-width: 56rem;
+    line-height: 1.75;
+    font-size: 1rem;
+    color: var(--text);
+}
+
+.docs-article h3 {
+    margin-top: 1.75rem;
+}
+
+.docs-lead {
+    font-size: 1.0625rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.docs-subheading {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.docs-muted {
+    color: var(--text-muted);
+    font-size: 0.9375rem;
+}
+
+.docs-anchor {
+    position: relative;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+}
+
+.docs-anchor-link {
+    color: var(--text-subtle);
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 150ms ease;
+    margin-left: -1.15em;
+    padding-right: 0.25em;
+}
+
+.docs-anchor:hover .docs-anchor-link,
+.docs-anchor-link:focus-visible {
+    opacity: 1;
+}
+
+.docs-anchor-link:focus-visible {
+    outline: none;
+    border-radius: 0.25rem;
+    box-shadow: 0 0 0 2px var(--ring);
+}
+
+.docs-list {
+    margin: 0.5rem 0 1rem;
+    padding-left: 1.25rem;
+    list-style: disc;
+}
+
+.docs-list--ordered {
+    list-style: decimal;
+}
+
+.docs-list > li {
+    margin-bottom: 0.35rem;
+}
+
+.docs-term {
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 0.75rem;
+}
+
+.docs-code {
+    display: block;
+    overflow-x: auto;
+    margin: 0.75rem 0 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--surface-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text);
+}
+
+.docs-table {
+    width: 100%;
+    margin: 0.75rem 0 1rem;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+}
+
+.docs-table th,
+.docs-table td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+
+.docs-table th {
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface-muted);
+}
+
+.docs-table a {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
+.dark .docs-table a {
+    color: var(--text);
+}
+
+/* Left sidebar groups */
+.docs-nav-group-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-subtle);
+}
+
+.docs-nav-link {
+    display: block;
+    padding: 0.3rem 0.75rem;
+    margin-left: -1px;
+    border-left: 2px solid transparent;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 120ms ease, border-color 120ms ease;
+}
+
+.docs-nav-link:hover {
+    color: var(--text);
+}
+
+.docs-nav-link.is-active {
+    color: var(--primary);
+    border-left-color: var(--primary);
+    font-weight: 600;
+}
+
+/* Right "On this page" TOC */
+.docs-toc-link {
+    display: block;
+    padding: 0.25rem 0.75rem;
+    margin-left: -1px;
+    border-left: 2px solid transparent;
+    color: var(--text-subtle);
+    text-decoration: none;
+    transition: color 120ms ease, border-color 120ms ease;
+}
+
+.docs-toc-link:hover {
+    color: var(--text);
+}
+
+.docs-toc-link.is-active {
+    color: var(--text);
+    border-left-color: var(--primary);
+}
+
+/* Drawer scrolls its own content; keep the nav compact inside it. */
+.docs-drawer .docs-nav-group + .docs-nav-group {
+    margin-top: 1.25rem;
+}

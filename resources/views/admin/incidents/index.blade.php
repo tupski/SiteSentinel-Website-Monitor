@@ -61,6 +61,13 @@
         <x-ui.button type="submit" variant="primary" size="sm">{{ __('Filter') }}</x-ui.button>
     </form>
 
+    @php
+        // Shared severity / status colour conventions (match the detail page and
+        // the dashboard palette).
+        $severityVariants = ['INFO' => 'info', 'WARNING' => 'warning', 'CRITICAL' => 'danger'];
+        $statusVariants = ['DETECTED' => 'danger', 'ACKNOWLEDGED' => 'warning', 'RESOLVED' => 'success'];
+    @endphp
+
     <x-ui.table>
         <x-ui.table-head>
             <tr>
@@ -77,8 +84,8 @@
                 <tr>
                     <td class="px-4 py-3 font-medium text-text">{{ $incident->website->name }}</td>
                     <td class="px-4 py-3 text-text-muted">{{ $incident->type }}</td>
-                    <td class="px-4 py-3">{{ $incident->severity }}</td>
-                    <td class="px-4 py-3">{{ $incident->status }}</td>
+                    <td class="px-4 py-3"><x-ui.badge :variant="$severityVariants[$incident->severity] ?? 'neutral'">{{ $incident->severity }}</x-ui.badge></td>
+                    <td class="px-4 py-3"><x-ui.badge :variant="$statusVariants[$incident->status] ?? 'neutral'">{{ $incident->status }}</x-ui.badge></td>
                     <td class="px-4 py-3 text-text-muted">{{ $incident->detected_at?->diffForHumans() }}</td>
                     <td class="px-4 py-3">
                         <a href="{{ route('admin.incidents.show', $incident) }}" class="text-text-muted underline hover:text-text">{{ __('View') }}</a>

@@ -875,11 +875,13 @@ Alpine.data('statusRefresh', (options = {}) => ({
     /**
      * Update the live text of each server-rendered service card IN PLACE.
      *
-     * The cards (and their inline-SVG availability charts) are rendered
-     * server-side; a refresh only needs to refresh the coarse label, the
-     * sample-based uptime figure and the day bucket. Rebuilding the nodes would
-     * discard the charts and the `chartTooltip` instances, so this mutates the
-     * existing DOM only. A service with no matching card is skipped.
+     * The cards are rendered server-side; a refresh only needs to refresh the
+     * coarse label, the sample-based uptime figure and the day bucket.
+     * Rebuilding the nodes would discard the `chartTooltip` instances on the
+     * page-level response-time chart, so this mutates the existing DOM only.
+     * The response-time chart itself is re-rendered on the next full page load
+     * (a reload, or Turbo navigation) rather than mutated here. A service with
+     * no matching card is skipped.
      */
     updateServices(list, services) {
         services.forEach((service) => {
@@ -1522,6 +1524,178 @@ Alpine.data('notificationList', (options = {}) => ({
         if (box) {
             box.textContent = '';
             box.classList.add('hidden');
+        }
+    },
+}));
+
+/**
+ * Documentation shell (Laravel-framework-docs style).
+ *
+ * Owns three concerns for the dedicated docs page
+ * (resources/views/components/docs-layout.blade.php):
+ *
+ *  1. Client-side SEARCH — filters both the grouped sidebar links and the
+ *     "On this page" TOC entries, and hides content `<section data-doc-section>`
+ *     blocks whose `data-search` haystack does not match. Purely local: no
+ *     network round-trip (server search is explicitly out of scope).
+ *  2. SCROLL-SPY — highlights the current section in the sidebar + TOC using an
+ *     IntersectionObserver, falling back to a scroll handler when unsupported.
+ *  3. Mobile DRAWER — off-canvas sidebar + TOC with focus trap and Escape,
+ *     mirroring the admin `sidebar` component.
+ *
+ * All state is local UI; nothing is persisted.
+ */
+Alpine.data('docsShell', () => ({
+    q: '',
+    visibleCount: 0,
+    sidebarOpen: false,
+    previousFocus: null,
+    active: '',
+    observer: null,
+    sections: [],
+
+    init() {
+        // Resolve which section ids exist on this page, once.
+        this.sections = Array.from(document.querySelectorAll('[data-doc-section]')).map(
+            (el) => el.id
+        );
+
+        this.$watch('q', () => this.applyFilter());
+        this.applyFilter();
+        this.spy();
+
+        // Keep the hash link in sync without fighting smooth scrolling.
+        window.addEventListener('hashchange', () => this.onHash());
+        this.onHash();
+    },
+
+    // --- Search -----------------------------------------------------------
+
+    matches(haystack) {
+        const q = this.q.trim().toLowerCase();
+        if (q === '') return true;
+        return (haystack || '').toLowerCase().includes(q);
+    },
+
+    applyFilter() {
+        let visible = 0;
+
+        document.querySelectorAll('[data-doc-section]').forEach((section) => {
+            const hit = this.matches(section.dataset.search || '');
+            section.style.display = hit ? '' : 'none';
+            if (hit) visible += 1;
+        });
+
+        document.querySelectorAll('[data-docs-nav-link], [data-docs-toc-link]').forEach((link) => {
+            const hit = this.matches(link.dataset.search || '');
+            link.style.display = hit ? '' : 'none';
+            const li = link.closest('li');
+            if (li) li.style.display = hit ? '' : 'none';
+        });
+
+        this.visibleCount = visible;
+    },
+
+    // --- Scroll spy -------------------------------------------------------
+
+    spy() {
+        if (this.sections.length === 0) return;
+
+        if ('IntersectionObserver' in window) {
+            this.observer = new IntersectionObserver(
+                (entries) => {
+                    // Pick the topmost intersecting section.
+                    const visible = entries.filter((e) => e.isIntersecting);
+                    if (visible.length === 0) return;
+                    this.setActive(visible[0].target.id);
+                },
+                { rootMargin: '-80px 0px -70% 0px', threshold: 0 }
+            );
+
+            this.sections.forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) this.observer.observe(el);
+            });
+            return;
+        }
+
+        // Fallback: passive scroll handler.
+        window.addEventListener('scroll', () => this.onScroll(), { passive: true });
+        this.onScroll();
+    },
+
+    onScroll() {
+        for (const id of this.sections) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            if (el.getBoundingClientRect().top <= 96) {
+                this.setActive(id);
+            }
+        }
+    },
+
+    setActive(id) {
+        if (this.active === id) return;
+        this.active = id;
+
+        document.querySelectorAll('[data-docs-nav-link], [data-docs-toc-link]').forEach((link) => {
+            const isActive = link.dataset.target === id;
+            link.classList.toggle('is-active', isActive);
+            if (isActive) {
+                link.setAttribute('aria-current', 'true');
+            } else {
+                link.removeAttribute('aria-current');
+            }
+        });
+    },
+
+    onHash() {
+        const id = (window.location.hash || '').replace('#', '');
+        if (id && this.sections.includes(id)) {
+            this.setActive(id);
+        }
+    },
+
+    // --- Drawer -----------------------------------------------------------
+
+    openDrawer() {
+        this.previousFocus = document.activeElement;
+        this.sidebarOpen = true;
+        this.$nextTick(() => {
+            const drawer = this.$refs.drawer;
+            if (!drawer) return;
+            const focusable = drawer.querySelector(
+                'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+            );
+            if (focusable) focusable.focus();
+            else drawer.focus();
+        });
+    },
+
+    closeDrawer(returnFocus = true) {
+        this.sidebarOpen = false;
+        if (returnFocus && this.previousFocus && typeof this.previousFocus.focus === 'function') {
+            this.previousFocus.focus();
+        }
+    },
+
+    trap(event) {
+        const drawer = this.$refs.drawer;
+        if (!drawer) return;
+        const nodes = drawer.querySelectorAll(
+            'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+        );
+        if (nodes.length === 0) return;
+
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
         }
     },
 }));

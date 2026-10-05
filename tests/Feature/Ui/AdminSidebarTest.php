@@ -206,11 +206,15 @@ final class AdminSidebarTest extends TestCase
 
     public static function activePageProvider(): array
     {
+        // NOTE: `admin.documentation` is intentionally absent. The Documentation
+        // page rework moved it OUT of the admin app shell into a dedicated
+        // standalone layout (no `#admin-sidebar`), so there is no admin nav item
+        // to mark active there. The sidebar still LINKS to it (see the nav tests
+        // above); only the shell-active assertion no longer applies.
         return [
             'dashboard' => ['admin.dashboard'],
             'websites' => ['admin.websites.index'],
             'settings' => ['admin.settings.edit'],
-            'documentation' => ['admin.documentation'],
         ];
     }
 

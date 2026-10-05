@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\Audit\AuditEvent;
 use App\Services\Audit\AuditLogger;
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -27,7 +28,8 @@ use Illuminate\Validation\ValidationException;
 final class LoginController extends Controller
 {
     public function __construct(
-        private readonly AuditLogger $audit
+        private readonly AuditLogger $audit,
+        private readonly SettingsRepository $settings,
     ) {}
 
     public function showLoginForm()
@@ -50,15 +52,16 @@ final class LoginController extends Controller
         ]);
 
         $key = $this->throttleKey($request);
-        $auth = config('sentinel.auth');
         $lockKey = $key.':locked';
 
-        // Hard lock: 10 failures / 30 min → identity locked for 15 min (§2.4).
-        // A dedicated marker carries the exact lock duration, independent of
-        // the counter's decay window.
-        if (RateLimiter::tooManyAttempts($key.':lockout', (int) $auth['lockout_threshold'])
+        // Thresholds read through the settings accessor (ADR-035, ADR-043) so an
+        // admin edit on the Settings page is applied; absent rows fall back to
+        // the config defaults. Hard lock: 10 failures / 30 min → identity locked
+        // for 15 min (§2.4). A dedicated marker carries the exact lock duration,
+        // independent of the counter's decay window.
+        if (RateLimiter::tooManyAttempts($key.':lockout', $this->settings->int(SettingsRepository::AUTH_LOCKOUT_THRESHOLD))
             && ! RateLimiter::tooManyAttempts($lockKey, 1)) {
-            RateLimiter::hit($lockKey, ((int) $auth['lockout_duration_minutes']) * 60);
+            RateLimiter::hit($lockKey, $this->settings->int(SettingsRepository::AUTH_LOCKOUT_DURATION) * 60);
         }
 
         if (RateLimiter::tooManyAttempts($lockKey, 1)) {
@@ -70,7 +73,7 @@ final class LoginController extends Controller
         }
 
         // Soft limit: 5 failures / 15 min → 429 (does not trigger lockout)
-        if (RateLimiter::tooManyAttempts($key.':soft', (int) $auth['max_login_attempts'])) {
+        if (RateLimiter::tooManyAttempts($key.':soft', $this->settings->int(SettingsRepository::AUTH_MAX_LOGIN_ATTEMPTS))) {
             $this->auditLockedAttempt($request);
 
             return $this->throttledResponse(
@@ -156,15 +159,13 @@ final class LoginController extends Controller
 
     private function recordFailure(string $key, Request $request): void
     {
-        $auth = config('sentinel.auth');
-
         RateLimiter::hit(
             $key.':soft',
-            ((int) $auth['soft_limit_window_minutes']) * 60
+            $this->settings->int(SettingsRepository::AUTH_SOFT_LIMIT_WINDOW) * 60
         );
         RateLimiter::hit(
             $key.':lockout',
-            ((int) $auth['lockout_window_minutes']) * 60
+            $this->settings->int(SettingsRepository::AUTH_LOCKOUT_WINDOW) * 60
         );
 
         /** @var User|null $user */

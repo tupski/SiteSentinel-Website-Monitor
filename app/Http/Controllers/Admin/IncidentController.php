@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Check;
+use App\Models\DetectionRule;
 use App\Models\Incident;
 use App\Models\Snapshot;
 use App\Services\Audit\AuditLogger;
@@ -16,6 +18,7 @@ use App\Support\PerPage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -29,6 +32,9 @@ use Throwable;
  */
 final class IncidentController extends Controller
 {
+    /** Rows per page for every paginated incident-detail section. */
+    private const SECTION_PER_PAGE = 10;
+
     public function __construct(
         private readonly IncidentStateMachine $stateMachine,
         private readonly AuditLogger $audit,
@@ -77,13 +83,79 @@ final class IncidentController extends Controller
         ]);
     }
 
-    public function show(Incident $incident): View
+    public function show(Request $request, Incident $incident): View
     {
-        $incident->load(['website', 'acknowledgedBy', 'resolvedBy', 'events.actor', 'snapshots', 'notificationLogs.channel']);
+        $incident->load(['website', 'acknowledgedBy', 'resolvedBy']);
 
-        $deliveryLogs = $incident->notificationLogs->sortByDesc('id');
+        // Rule attribution is persisted as a `rule_id => meta` map on the
+        // incident (never a relation), so it is paginated manually while
+        // preserving the rule_id keys — the view links each row to its
+        // rule-details and reason modals.
+        $rules = collect(is_array($incident->triggered_rules) ? $incident->triggered_rules : []);
+        $rulePage = max(1, (int) $request->query('rule_page', 1));
+        $ruleAttribution = new LengthAwarePaginator(
+            $rules->slice(($rulePage - 1) * self::SECTION_PER_PAGE, self::SECTION_PER_PAGE, true),
+            $rules->count(),
+            self::SECTION_PER_PAGE,
+            $rulePage,
+            ['path' => $request->url(), 'pageName' => 'rule_page'],
+        );
+        $ruleAttribution->withQueryString();
 
-        return view('admin.incidents.show', ['incident' => $incident, 'deliveryLogs' => $deliveryLogs]);
+        // Registry metadata (name / category / config thresholds) backs the
+        // rule-details modal.
+        $ruleDetails = DetectionRule::query()
+            ->whereIn('rule_id', $rules->keys()->all())
+            ->get()
+            ->keyBy('rule_id');
+
+        // Related data for the reason modal. Per-rule `evidence` (specific
+        // URLs/elements) is intentionally NOT persisted on `triggered_rules`
+        // (DetectionResult drops it), so the closest available evidence is the
+        // set of recent checks for this website that fired the rule. Grouped by
+        // rule id here (controller orchestration) so the view stays presentational.
+        $recentChecks = Check::query()
+            ->where('website_id', $incident->website_id)
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        $affectedChecksByRule = [];
+        foreach ($rules->keys() as $ruleId) {
+            $affectedChecksByRule[$ruleId] = $recentChecks
+                ->filter(fn (Check $check): bool => is_array($check->triggered_rules)
+                    && array_key_exists($ruleId, $check->triggered_rules))
+                ->values();
+        }
+
+        // The four detail sections paginate server-side at 10 rows/page; each
+        // uses its own page name so the sections page independently while
+        // `withQueryString()` preserves every other query parameter.
+        $deliveryLogs = $incident->notificationLogs()
+            ->with('channel')
+            ->orderByDesc('id')
+            ->paginate(self::SECTION_PER_PAGE, ['*'], 'delivery_page')
+            ->withQueryString();
+
+        $timeline = $incident->events()
+            ->with('actor')
+            ->paginate(self::SECTION_PER_PAGE, ['*'], 'timeline_page')
+            ->withQueryString();
+
+        $snapshots = $incident->snapshots()
+            ->orderByDesc('captured_at')
+            ->paginate(self::SECTION_PER_PAGE, ['*'], 'snapshots_page')
+            ->withQueryString();
+
+        return view('admin.incidents.show', [
+            'incident' => $incident,
+            'ruleAttribution' => $ruleAttribution,
+            'ruleDetails' => $ruleDetails,
+            'affectedChecksByRule' => $affectedChecksByRule,
+            'deliveryLogs' => $deliveryLogs,
+            'timeline' => $timeline,
+            'snapshots' => $snapshots,
+        ]);
     }
 
     /**

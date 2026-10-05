@@ -9,10 +9,9 @@
             </div>
             <p class="mt-1 text-sm text-text-muted">{{ $page->name }}</p>
         </div>
-        <a href="{{ route('admin.status-pages.index') }}"
-           class="text-sm text-text-muted underline hover:text-text">
+        <x-ui.button :href="route('admin.status-pages.index')" variant="secondary" size="sm">
             {{ __('Back to status pages') }}
-        </a>
+        </x-ui.button>
     </div>
 
     {{-- Reporting period selector (allowlisted server-side; UTC boundaries). --}}

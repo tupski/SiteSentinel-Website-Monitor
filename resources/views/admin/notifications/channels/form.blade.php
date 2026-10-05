@@ -201,7 +201,7 @@
                     <span x-show="! sending">{{ __('Send test') }}</span>
                     <span x-show="sending" x-cloak>{{ __('Sending…') }}</span>
                 </x-ui.button>
-                <a href="{{ route('admin.notifications.index') }}" class="text-sm text-text-muted underline hover:text-text">{{ __('Cancel') }}</a>
+                <x-ui.button :href="route('admin.notifications.index')" variant="secondary">{{ __('Cancel') }}</x-ui.button>
 
                 <p class="w-full text-sm" x-show="result" x-cloak
                    x-bind:class="result && result.ok ? 'text-success' : 'text-danger'"

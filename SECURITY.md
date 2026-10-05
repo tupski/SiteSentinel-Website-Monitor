@@ -747,6 +747,8 @@ Security-relevant events are written to `audit_logs` (columns: `user_id`, `event
 | `incident.resolved` | Resolution, with `metadata.resolution_mode` = `manual` or `auto` (`FR-57`, `FR-59`). |
 | `rule.changed` | A `detection_rules` or `website_rule_settings` change. |
 | `settings.changed` | A sensitive `settings` change (thresholds, retention). |
+| `settings.pulled` | A settings "pull update" applied an upstream/default snapshot (metadata `{source, applied, version}`). |
+| `settings.rolled_back` | Settings were rolled back to a previous snapshot (metadata `{from_version, to_version, applied}`). |
 | `channel.secret.updated` | A notification channel's `secret_ref` is updated. |
 | `channel.tested` | A channel test send. |
 | `status_page.visibility.changed` | `status_page_settings.visibility_mode` changed (metadata `{from, to}`). |

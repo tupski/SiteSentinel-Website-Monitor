@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Console\Command;
 
 /**
@@ -49,7 +50,7 @@ final class InstallAdminCommand extends Command
             $password = $this->secret('Admin password (min 12 chars, input hidden)');
         }
 
-        $minLen = (int) config('sentinel.auth.min_password_length');
+        $minLen = max(12, (int) settings(SettingsRepository::AUTH_MIN_PASSWORD_LENGTH));
 
         if (mb_strlen($password) < $minLen) {
             $this->error("Password must be at least {$minLen} characters (SECURITY.md §2.3).");

@@ -129,13 +129,16 @@
         </div>
     </section>
 
-    {{-- Period filter (allowlisted enum; server-rendered links, no JS needed). --}}
+    {{-- Period filter (allowlisted enum; server-rendered links, no JS needed).
+         The active pill uses the `bg-primary`/`text-primary-foreground` token
+         pair so it is readable in BOTH themes: in dark mode `--primary` flips to
+         a light surface, so a hard-coded white label would vanish. --}}
     <nav aria-label="{{ __('Reporting period') }}" class="mb-6 flex flex-wrap items-center gap-2">
         @foreach ($periods as $value => $label)
             <a href="{{ route('status.show', ['statusPage' => $statusPage->slug]) }}?period={{ $value }}"
                @if ($value === $period) aria-current="page" @endif
                class="rounded-full border px-3 py-1 text-sm {{ $value === $period
-                   ? 'border-primary bg-primary text-white'
+                   ? 'border-primary bg-primary text-primary-foreground'
                    : 'border-border bg-surface-elevated text-text-muted hover:text-text' }}">
                 {{ __($label) }}
             </a>
@@ -148,11 +151,15 @@
 
     <section aria-label="Services" class="space-y-4" id="status-services">
         @forelse($dto->services as $service)
-            @include('status._service', ['service' => $service, 'dto' => $dto])
+            @include('status._service', ['service' => $service])
         @empty
             <p class="rounded border border-border bg-surface-elevated p-4 text-sm text-text-subtle">{{ __('No services published.') }}</p>
         @endforelse
     </section>
+
+    {{-- One bar per checked website; taller = slower; bottom axis = time checked.
+         Renders nothing when no timed check exists (never a fabricated series). --}}
+    @include('status._response_chart', ['services' => $dto->services])
 
     @if($historyEnabled)
         @include('status._history', ['services' => $dto->services])

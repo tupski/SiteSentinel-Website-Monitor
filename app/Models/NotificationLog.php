@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\MassPrunable;
@@ -75,7 +76,7 @@ final class NotificationLog extends Model
     public function prunable(): Builder
     {
         return self::query()->where('created_at', '<=', now()->subDays(
-            max(1, (int) config('sentinel.retention.notification_logs_days', 90))
+            max(1, (int) settings(SettingsRepository::RETENTION_NOTIFICATION_LOGS_DAYS))
         ));
     }
 }

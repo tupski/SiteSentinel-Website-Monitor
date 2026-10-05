@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\MassPrunable;
@@ -73,7 +74,10 @@ final class Check extends Model
      */
     public function prunable(): Builder
     {
-        $days = max(1, (int) config('sentinel.retention.checks_days', 30));
+        // Read through the settings accessor (ADR-035, ADR-043) so an admin
+        // edit on the Settings page is actually applied; falls back to the
+        // config default when no row is stored.
+        $days = max(1, (int) settings(SettingsRepository::RETENTION_CHECKS_DAYS));
 
         return self::query()->where('created_at', '<=', now()->subDays($days));
     }

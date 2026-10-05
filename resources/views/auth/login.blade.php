@@ -1,11 +1,15 @@
+@php($appName = $siteName ?? config('app.name', 'SiteSentinel'))
 <x-app-layout>
-    <x-slot name="title">{{ __('Sign in') }} — SiteSentinel</x-slot>
+    <x-slot name="title">{{ __('Sign in') }} — {{ $appName }}</x-slot>
 
     <div class="flex min-h-screen flex-col items-center justify-center px-4">
         <div class="w-full max-w-sm rounded-lg border border-border bg-surface-elevated p-6 shadow-sm">
             <div class="flex items-start justify-between">
                 <div>
-                    <h1 class="text-xl font-bold tracking-tight text-text">SiteSentinel</h1>
+                    @if (! empty($siteLogoUrl))
+                        <img src="{{ $siteLogoUrl }}" alt="{{ $appName }}" class="mb-2 h-10 w-auto">
+                    @endif
+                    <h1 class="text-xl font-bold tracking-tight text-text">{{ $appName }}</h1>
                     <p class="mt-1 text-sm text-text-muted">Admin sign-in</p>
                 </div>
                 <x-theme-switcher />

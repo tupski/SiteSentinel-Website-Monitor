@@ -1,11 +1,21 @@
 <x-admin-layout>
     <x-slot name="title">{{ __('Incident') }} #{{ $incident->id }} — SiteSentinel Admin</x-slot>
 
-    <div class="mb-6 flex items-center justify-between">
+    @php
+        // Shared severity / status colour conventions (match the app palette).
+        $severityVariants = ['INFO' => 'info', 'WARNING' => 'warning', 'CRITICAL' => 'danger'];
+        $statusVariants = ['DETECTED' => 'danger', 'ACKNOWLEDGED' => 'warning', 'RESOLVED' => 'success'];
+        $severityVariant = $severityVariants[$incident->severity] ?? 'neutral';
+        $statusVariant = $statusVariants[$incident->status] ?? 'neutral';
+    @endphp
+
+    <div class="mb-6 flex items-center justify-between gap-4">
         <h1 class="text-2xl font-bold tracking-tight text-text">
             {{ __('Incident') }} #{{ $incident->id }} — {{ $incident->website->name }}
         </h1>
-        <a href="{{ route('admin.incidents.index') }}" class="text-sm text-text-muted underline hover:text-text">{{ __('Back to incidents') }}</a>
+        <x-ui.button :href="route('admin.incidents.index')" variant="secondary" size="sm">
+            {{ __('Back to incidents') }}
+        </x-ui.button>
     </div>
 
     @if (session('status'))
@@ -29,11 +39,11 @@
                     </div>
                     <div>
                         <dt class="text-text-muted">{{ __('Severity') }}</dt>
-                        <dd class="font-medium">{{ $incident->severity }}</dd>
+                        <dd class="font-medium"><x-ui.badge :variant="$severityVariant">{{ $incident->severity }}</x-ui.badge></dd>
                     </div>
                     <div>
                         <dt class="text-text-muted">{{ __('Status') }}</dt>
-                        <dd class="font-medium">{{ $incident->status }}</dd>
+                        <dd class="font-medium"><x-ui.badge :variant="$statusVariant">{{ $incident->status }}</x-ui.badge></dd>
                     </div>
                     <div>
                         <dt class="text-text-muted">{{ __('Score') }}</dt>
@@ -76,7 +86,7 @@
                 {{-- AC-6-06 / FR-49: exact rule attribution must be visible. --}}
                 <section class="rounded-lg border border-border bg-surface-elevated p-6 shadow-sm">
                     <h2 class="text-lg font-semibold text-text">{{ __('Rule attribution') }}</h2>
-                    <x-ui.table class="mt-3">
+                    <x-ui.table class="mt-3" :flush="true">
                         <x-ui.table-head>
                             <tr class="text-left">
                                 <th class="py-2">{{ __('Rule') }}</th>
@@ -87,18 +97,165 @@
                             </tr>
                         </x-ui.table-head>
                         <x-ui.table-body>
-                            @foreach ($incident->triggered_rules as $ruleId => $meta)
+                            @foreach ($ruleAttribution as $ruleId => $meta)
+                                @php
+                                    $confidenceVariant = ['high' => 'success', 'medium' => 'warning', 'low' => 'neutral'][strtolower((string) ($meta['confidence'] ?? ''))] ?? 'neutral';
+                                @endphp
                                 <tr>
-                                    <td class="py-2 font-mono">{{ $ruleId }}</td>
+                                    <td class="py-2 font-mono">
+                                        <a href="#"
+                                           class="rounded text-info underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated"
+                                           x-on:click.prevent="$dispatch('open-modal', { name: 'rule-{{ $ruleId }}' })"
+                                           aria-label="{{ __('View details for rule :rule', ['rule' => $ruleId]) }}">{{ $ruleId }}</a>
+                                    </td>
                                     <td class="py-2">{{ $meta['category'] ?? '—' }}</td>
                                     <td class="py-2">{{ $meta['weight'] ?? '—' }}</td>
-                                    <td class="py-2">{{ $meta['confidence'] ?? '—' }}</td>
-                                    <td class="py-2 text-text-muted">{{ $meta['reason'] ?? '—' }}</td>
+                                    <td class="py-2"><x-ui.badge :variant="$confidenceVariant">{{ $meta['confidence'] ?? '—' }}</x-ui.badge></td>
+                                    <td class="py-2 text-text-muted">
+                                        <a href="#"
+                                           class="rounded text-text-muted underline-offset-2 hover:text-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated"
+                                           x-on:click.prevent="$dispatch('open-modal', { name: 'reason-{{ $ruleId }}' })">{{ $meta['reason'] ?? '—' }}</a>
+                                    </td>
                                 </tr>
                             @endforeach
                         </x-ui.table-body>
                     </x-ui.table>
+
+                    @if ($ruleAttribution->hasPages())
+                        <div class="mt-4">{{ $ruleAttribution->links() }}</div>
+                    @endif
                 </section>
+
+                {{-- One rule-details modal per attribution row. Metadata comes from
+                     the DetectionRule registry; config holds thresholds/limits. --}}
+                @foreach ($ruleAttribution as $ruleId => $meta)
+                    @php($rule = $ruleDetails[$ruleId] ?? null)
+                    <x-modal name="rule-{{ $ruleId }}" :title="__('Rule details')" max-width="max-w-2xl">
+                        <div class="space-y-4 text-text">
+                            <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Rule code') }}</dt>
+                                    <dd class="font-mono">{{ $ruleId }}</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Name') }}</dt>
+                                    <dd class="font-medium">{{ $rule?->name ?? '—' }}</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Category') }}</dt>
+                                    <dd>{{ $rule?->category ?? ($meta['category'] ?? '—') }}</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Default severity') }}</dt>
+                                    <dd>
+                                        @if ($rule)
+                                            <x-ui.badge :variant="$severityVariants[$rule->severity] ?? 'neutral'">{{ $rule->severity }}</x-ui.badge>
+                                        @else
+                                            —
+                                        @endif
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Default weight') }}</dt>
+                                    <dd>{{ $rule?->default_weight ?? ($meta['weight'] ?? '—') }}</dd>
+                                </div>
+                                <div>
+                                    <dt class="text-text-subtle">{{ __('Enabled') }}</dt>
+                                    <dd>{{ $rule ? ($rule->enabled ? __('Yes') : __('No')) : '—' }}</dd>
+                                </div>
+                            </dl>
+
+                            @if (is_array($meta))
+                                <div>
+                                    <h3 class="text-sm font-semibold text-text">{{ __('Attribution on this incident') }}</h3>
+                                    <dl class="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+                                        <div>
+                                            <dt class="text-text-subtle">{{ __('Weight') }}</dt>
+                                            <dd>{{ $meta['weight'] ?? '—' }}</dd>
+                                        </div>
+                                        <div>
+                                            <dt class="text-text-subtle">{{ __('Confidence') }}</dt>
+                                            <dd>{{ $meta['confidence'] ?? '—' }}</dd>
+                                        </div>
+                                        <div>
+                                            <dt class="text-text-subtle">{{ __('Reason') }}</dt>
+                                            <dd>{{ $meta['reason'] ?? '—' }}</dd>
+                                        </div>
+                                    </dl>
+                                </div>
+                            @endif
+
+                            @if ($rule && is_array($rule->config) && $rule->config !== [])
+                                <div>
+                                    <h3 class="text-sm font-semibold text-text">{{ __('Thresholds / configuration') }}</h3>
+                                    <dl class="mt-2 space-y-1 text-sm">
+                                        @foreach ($rule->config as $key => $value)
+                                            <div class="flex items-start justify-between gap-4 border-b border-border pb-1">
+                                                <dt class="font-mono text-text-subtle">{{ $key }}</dt>
+                                                <dd class="text-right font-mono">{{ is_array($value) ? json_encode($value) : (is_bool($value) ? ($value ? 'true' : 'false') : (string) $value) }}</dd>
+                                            </div>
+                                        @endforeach
+                                    </dl>
+                                </div>
+                            @endif
+                        </div>
+
+                        <x-slot name="footer">
+                            <x-ui.button type="button" variant="outline" x-on:click="$dispatch('close-modal', { name: 'rule-{{ $ruleId }}' })">{{ __('Close') }}</x-ui.button>
+                        </x-slot>
+                    </x-modal>
+                @endforeach
+
+                {{-- One reason modal per attribution row: lists the recent checks
+                     in which this rule fired (the closest available "affected
+                     items" evidence — per-rule URLs/elements are not persisted).
+                     The per-rule check set is grouped in the controller. --}}
+                @foreach ($ruleAttribution as $ruleId => $meta)
+                    @php($affectedChecks = $affectedChecksByRule[$ruleId] ?? collect())
+                    <x-modal name="reason-{{ $ruleId }}" :title="__('Reason — :rule', ['rule' => $ruleId])" max-width="max-w-3xl">
+                        <div class="space-y-4 text-text">
+                            <p>{{ $meta['reason'] ?? '—' }}</p>
+
+                            <div>
+                                <h3 class="text-sm font-semibold text-text">{{ __('Affected checks') }}</h3>
+                                <p class="mt-1 text-xs text-text-subtle">
+                                    {{ __('Per-rule URLs or elements are not persisted with the incident. The table lists recent checks for this website in which the rule fired.') }}
+                                </p>
+
+                                @if ($affectedChecks->isEmpty())
+                                    <p class="mt-2 text-sm text-text-muted">{{ __('No recent checks recorded for this rule.') }}</p>
+                                @else
+                                    <x-ui.table class="mt-2" :flush="true">
+                                        <x-ui.table-head>
+                                            <tr class="text-left">
+                                                <th class="py-2">{{ __('URL') }}</th>
+                                                <th class="py-2">{{ __('HTTP') }}</th>
+                                                <th class="py-2">{{ __('State') }}</th>
+                                                <th class="py-2">{{ __('Check reason') }}</th>
+                                                <th class="py-2">{{ __('When') }}</th>
+                                            </tr>
+                                        </x-ui.table-head>
+                                        <x-ui.table-body>
+                                            @foreach ($affectedChecks as $check)
+                                                <tr>
+                                                    <td class="max-w-[16rem] truncate py-2 font-mono text-xs" title="{{ $check->final_url }}">{{ $check->final_url ?? '—' }}</td>
+                                                    <td class="py-2">{{ $check->http_status ?? '—' }}</td>
+                                                    <td class="py-2">{{ $check->security_state ?? '—' }}</td>
+                                                    <td class="py-2 text-text-muted">{{ $check->triggered_rules[$ruleId]['reason'] ?? '—' }}</td>
+                                                    <td class="py-2 text-text-subtle">{{ $check->created_at?->format('Y-m-d H:i:s') ?? '—' }}</td>
+                                                </tr>
+                                            @endforeach
+                                        </x-ui.table-body>
+                                    </x-ui.table>
+                                @endif
+                            </div>
+                        </div>
+
+                        <x-slot name="footer">
+                            <x-ui.button type="button" variant="outline" x-on:click="$dispatch('close-modal', { name: 'reason-{{ $ruleId }}' })">{{ __('Close') }}</x-ui.button>
+                        </x-slot>
+                    </x-modal>
+                @endforeach
             @endif
 
             @if ($incident->type === 'availability' && is_array($incident->technical_metadata))
@@ -128,7 +285,7 @@
                     <h2 class="text-lg font-semibold text-text">{{ __('Delivery history') }}</h2>
                     <a href="{{ route('admin.notification-logs.index', ['incident_id' => $incident->id]) }}" class="text-sm text-text-muted underline hover:text-text">{{ __('View in logs') }}</a>
                 </div>
-                <x-ui.table class="mt-3">
+                <x-ui.table class="mt-3" :flush="true">
                     <x-ui.table-head>
                         <tr class="text-left">
                             <th class="py-2">{{ __('Channel') }}</th>
@@ -139,10 +296,11 @@
                         </tr>
                     </x-ui.table-head>
                     <x-ui.table-body>
-                        @forelse (($deliveryLogs ?? $incident->notificationLogs ?? collect()) as $log)
+                        @forelse ($deliveryLogs as $log)
+                            @php($logStatusVariant = ['sent' => 'success', 'failed' => 'danger', 'suppressed' => 'warning', 'queued' => 'info'][$log->status] ?? 'neutral')
                             <tr>
                                 <td class="py-2">{{ $log->channel?->name ?? '—' }} <span class="text-text-subtle">({{ $log->channel?->type ?? '—' }})</span></td>
-                                <td class="py-2">{{ $log->status }}</td>
+                                <td class="py-2"><x-ui.badge :variant="$logStatusVariant">{{ $log->status }}</x-ui.badge></td>
                                 <td class="py-2">{{ $log->attempt }}</td>
                                 <td class="py-2 text-text-muted">{{ $log->error ?? '—' }}</td>
                                 <td class="py-2 text-text-muted">{{ ($log->sent_at ?? $log->created_at)?->format('Y-m-d H:i:s') ?? '—' }}</td>
@@ -152,13 +310,17 @@
                         @endforelse
                     </x-ui.table-body>
                 </x-ui.table>
+
+                @if ($deliveryLogs->hasPages())
+                    <div class="mt-4">{{ $deliveryLogs->links() }}</div>
+                @endif
             </section>
 
             {{-- FR-57: immutable audit trail of state transitions. --}}
             <section class="rounded-lg border border-border bg-surface-elevated p-6 shadow-sm">
                 <h2 class="text-lg font-semibold text-text">{{ __('Timeline') }}</h2>
                 <ol class="mt-3 space-y-3 text-sm">
-                    @forelse ($incident->events as $event)
+                    @forelse ($timeline as $event)
                         <li class="border-l-2 border-border pl-4">
                             <div class="font-medium">
                                 {{ $event->event_type }}
@@ -180,6 +342,10 @@
                         <li class="text-text-muted">{{ __('No events recorded.') }}</li>
                     @endforelse
                 </ol>
+
+                @if ($timeline->hasPages())
+                    <div class="mt-4">{{ $timeline->links() }}</div>
+                @endif
             </section>
         </div>
 
@@ -208,7 +374,7 @@
                 @endif
             </section>
 
-            @if ($incident->snapshots->isNotEmpty())
+            @if ($snapshots->isNotEmpty())
                 {{-- Evidence is admin-only. The path is shown as data and the
                      captured bytes are only ever rendered inside a sandboxed
                      <iframe> pointing at the admin-only snapshot endpoint — never
@@ -216,7 +382,7 @@
                 <section class="rounded-lg border border-border bg-surface-elevated p-6 shadow-sm">
                     <h2 class="text-lg font-semibold text-text">{{ __('Evidence snapshots') }}</h2>
                     <ul class="mt-3 space-y-2 text-sm">
-                        @foreach ($incident->snapshots as $snapshot)
+                        @foreach ($snapshots as $snapshot)
                             <li class="flex items-start justify-between gap-3">
                                 <div class="min-w-0">
                                     <span class="block truncate font-mono text-xs" title="{{ $snapshot->html_path }}">{{ $snapshot->html_path }}</span>
@@ -232,6 +398,10 @@
                             </li>
                         @endforeach
                     </ul>
+
+                    @if ($snapshots->hasPages())
+                        <div class="mt-4">{{ $snapshots->links() }}</div>
+                    @endif
                 </section>
 
                 {{-- One modal per snapshot. The iframe `src` is bound to the modal
@@ -239,7 +409,7 @@
                      page load) and only from the admin-only, incident-scoped
                      endpoint. `sandbox=""` disables scripts, forms, plugins and
                      same-origin access in the framed document. --}}
-                @foreach ($incident->snapshots as $snapshot)
+                @foreach ($snapshots as $snapshot)
                     <x-modal name="snapshot-{{ $snapshot->id }}" :title="__('Evidence snapshot')" max-width="max-w-5xl">
                         <div class="space-y-3">
                             <dl class="grid grid-cols-2 gap-2 text-xs">

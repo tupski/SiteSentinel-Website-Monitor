@@ -23,17 +23,36 @@ use Illuminate\View\View;
  */
 final class AdminDashboardController extends Controller
 {
+    /**
+     * Maximum rows the Availability / Security & Content Health tables render.
+     * Beyond this the section defers to the full list page via a "View all"
+     * link (the total is exposed separately so the view stays presentational).
+     */
+    private const TABLE_LIMIT = 10;
+
     public function __invoke(SystemHealth $health): View
     {
-        $websites = Website::query()->orderBy('name')->get();
+        // Counters are computed with real queries (never from the capped table
+        // collection) so the four summary numbers always reflect the full fleet,
+        // even when more than TABLE_LIMIT websites exist.
+        $websiteCount = Website::query()->count();
+        $operationalCount = Website::query()->where('status_availability', 'UP')->count();
+
+        // The Availability / Security & Content Health tables share the fleet,
+        // ordered by name and capped at TABLE_LIMIT. The total drives the
+        // "View all" affordance and is passed separately from the rows.
+        $websites = Website::query()
+            ->orderBy('name')
+            ->limit(self::TABLE_LIMIT)
+            ->get();
 
         // AC-21: expose DB / Redis / queue-worker readiness on the dashboard so a
         // stalled monitoring pipeline is visible to Admin without hitting /health.
         $healthChecks = $health->checks();
 
         $counters = [
-            'total' => $websites->count(),
-            'operational' => $websites->where('status_availability', 'UP')->count(),
+            'total' => $websiteCount,
+            'operational' => $operationalCount,
             'warning' => Incident::query()
                 ->whereIn('status', ['DETECTED', 'ACKNOWLEDGED'])
                 ->where('severity', 'WARNING')
@@ -49,7 +68,11 @@ final class AdminDashboardController extends Controller
 
         return view('admin.dashboard', [
             'counters' => $counters,
+            // Already capped at TABLE_LIMIT; `websiteTotal` is the uncapped fleet
+            // size so the Availability / Security tables can decide whether to
+            // render the "View all" link without re-querying in the view.
             'websites' => $websites,
+            'websiteTotal' => $websiteCount,
             'health' => $healthChecks,
             'healthHealthy' => $health->isHealthy($healthChecks),
             'openIncidents' => Incident::query()

@@ -4,19 +4,22 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Services\Settings\SettingsRepository;
 use DateTimeZone;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Validation for the admin system settings form (ADR-035).
+ * Validation for the admin system settings form (ADR-035, ADR-043).
  *
- * The accepted key set is a fixed whitelist — `site_name`, `site_description`,
- * `site_logo`, `favicon`, `timezone` — so arbitrary keys (and any attempt to
- * smuggle an infrastructure secret such as `app_key` or `mail_password`) are
- * rejected by validation rather than silently ignored. Uploads are checked by
- * mime type, extension and size; the filename is never trusted (the controller
- * stores under a generated name).
+ * Rules are derived from the {@see SettingsRepository} key registry, so a new
+ * setting is added in exactly one place. The timezone is validated against the
+ * full PHP identifier list. Uploads are checked by mime type, extension and
+ * size; the filename is never trusted (the controller stores under a generated
+ * name).
+ *
+ * Infrastructure secrets (APP_KEY, DB, SMTP, API, queue credentials) are NOT in
+ * the registry and can never be written through this endpoint.
  */
 final class UpdateSystemSettingsRequest extends FormRequest
 {
@@ -30,30 +33,40 @@ final class UpdateSystemSettingsRequest extends FormRequest
      */
     public function rules(): array
     {
-        $allowedLogoExtensions = ['png', 'jpg', 'jpeg', 'svg', 'webp'];
-        $allowedFaviconExtensions = ['ico', 'png', 'svg'];
-
-        return [
+        $rules = [
             'site_name' => ['required', 'string', 'max:255'],
             'site_description' => ['nullable', 'string', 'max:500'],
             'timezone' => ['required', 'string', Rule::in(DateTimeZone::listIdentifiers())],
             'site_logo' => [
                 'nullable',
                 'file',
-                'mimes:'.implode(',', $allowedLogoExtensions),
+                'mimes:png,jpg,jpeg,svg,webp',
                 'mimetypes:image/png,image/jpeg,image/svg+xml,image/webp',
                 'max:2048',
             ],
             'favicon' => [
                 'nullable',
                 'file',
-                'mimes:'.implode(',', $allowedFaviconExtensions),
+                'mimes:ico,png,svg',
                 'mimetypes:image/vnd.microsoft.icon,image/x-icon,image/png,image/svg+xml',
                 'max:256',
             ],
             'remove_site_logo' => ['nullable', 'boolean'],
             'remove_favicon' => ['nullable', 'boolean'],
         ];
+
+        // Numeric/operational settings: the registry owns their bounds.
+        foreach (SettingsRepository::definitions() as $definition) {
+            $field = $definition['field'];
+
+            if (in_array($field, ['site_name', 'site_description', 'timezone', 'site_logo', 'favicon'], true)) {
+                continue;
+            }
+
+            $rules[$field] = $definition['rules'];
+        }
+
+        return $rules;
     }
 
     /**

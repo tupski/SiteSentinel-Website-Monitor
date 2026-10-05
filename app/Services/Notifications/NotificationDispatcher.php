@@ -11,6 +11,7 @@ use App\Models\NotificationChannel;
 use App\Models\NotificationCooldown;
 use App\Models\NotificationLog;
 use App\Models\Website;
+use App\Services\Settings\SettingsRepository;
 use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -240,7 +241,7 @@ final class NotificationDispatcher
 
     private function openCooldownWindow(int $incidentId, int $channelId, int $websiteId, string $eventKind): void
     {
-        $minutes = max(1, (int) config('sentinel.notifications.default_cooldown_minutes', 15));
+        $minutes = max(1, (int) settings(SettingsRepository::NOTIFICATIONS_COOLDOWN_MINUTES));
         $now = now();
 
         NotificationCooldown::updateOrCreate(

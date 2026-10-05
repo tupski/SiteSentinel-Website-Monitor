@@ -9,6 +9,7 @@ use App\Mail\PasswordResetMail;
 use App\Models\User;
 use App\Services\Audit\AuditEvent;
 use App\Services\Audit\AuditLogger;
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -93,7 +94,7 @@ final class PasswordResetController extends Controller
         $data = $request->validate([
             'token' => ['required', 'string'],
             'email' => ['required', 'email'],
-            'password' => ['required', 'string', 'min:'.(int) config('sentinel.auth.min_password_length'), 'confirmed'],
+            'password' => ['required', 'string', 'min:'.max(12, (int) settings(SettingsRepository::AUTH_MIN_PASSWORD_LENGTH)), 'confirmed'],
         ]);
 
         /** @var User|null $user */

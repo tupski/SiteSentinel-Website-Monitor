@@ -8,6 +8,7 @@ use App\Models\Check;
 use App\Models\Incident;
 use App\Models\Website;
 use App\Services\Notifications\AdminNotificationService;
+use App\Services\Settings\SettingsRepository;
 use App\Services\StatusPage\StatusPageCache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -87,7 +88,7 @@ final class IncidentEngine
         $open = $this->findOpen($website, 'availability');
 
         if ($check->availability_state === 'DOWN') {
-            $failureThreshold = max(1, (int) config('sentinel.monitoring.consecutive_failures_threshold', 2));
+            $failureThreshold = max(1, (int) settings(SettingsRepository::MONITORING_CONSECUTIVE_FAILURES));
 
             if ($website->consecutive_failures < $failureThreshold) {
                 // Single transient failure: never an incident by default (FR-53).
@@ -96,7 +97,7 @@ final class IncidentEngine
 
             $criticalAfter = max(
                 $failureThreshold,
-                (int) config('sentinel.incidents.availability_critical_after_failures', 6),
+                (int) settings(SettingsRepository::INCIDENTS_CRITICAL_AFTER_FAILURES),
             );
             $severity = $website->consecutive_failures >= $criticalAfter ? 'CRITICAL' : self::AVAILABILITY_SEVERITY;
 
@@ -281,7 +282,7 @@ final class IncidentEngine
             return null;
         }
 
-        $required = max(1, (int) config('sentinel.incidents.recovery_consecutive_checks', 2));
+        $required = max(1, (int) settings(SettingsRepository::INCIDENTS_RECOVERY_CHECKS));
 
         if ($website->consecutive_successes < $required) {
             // Not yet sustained: record recovery progress on the timeline only.

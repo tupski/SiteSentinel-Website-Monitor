@@ -34,7 +34,7 @@ final class StatusPageHistoryTest extends StatusPageTestCase
         return $period !== '' ? $url.'?period='.$period : $url;
     }
 
-    private function check(int $websiteId, string $at, string $state): void
+    private function check(int $websiteId, string $at, string $state, ?int $durationMs = null): void
     {
         Check::create([
             'website_id' => $websiteId,
@@ -42,6 +42,7 @@ final class StatusPageHistoryTest extends StatusPageTestCase
             'started_at' => Carbon::parse($at, 'UTC'),
             'finished_at' => Carbon::parse($at, 'UTC'),
             'availability_state' => $state,
+            'duration_ms' => $durationMs,
         ]);
     }
 
@@ -133,7 +134,8 @@ final class StatusPageHistoryTest extends StatusPageTestCase
         $this->travelTo(Carbon::parse('2026-10-04 12:00:00', 'UTC'));
 
         $site = $this->makeWebsite(['status_alias' => 'Alpha']);
-        $this->check($site->id, '2026-10-04 11:00:00', 'UP');
+        // A timed check so the page-level response-time chart renders a bar.
+        $this->check($site->id, '2026-10-04 11:00:00', 'UP', 250);
 
         $html = (string) $this->get(route('status.show', ['statusPage' => $this->defaultPage()->slug]))->getContent();
 
@@ -143,10 +145,12 @@ final class StatusPageHistoryTest extends StatusPageTestCase
         $this->assertStringContainsString('period=30d', $html);
         $this->assertStringContainsString('period=90d', $html);
 
-        // The chart renders a bar with a native tooltip title.
+        // The response-time chart renders a bar with a native tooltip title and
+        // a labelled bottom (time) axis.
         $this->assertStringContainsString('<svg', $html);
         $this->assertStringContainsString('<rect', $html);
         $this->assertStringContainsString('<title>', $html);
+        $this->assertStringContainsString('Time checked (UTC)', $html);
     }
 
     public function test_no_availability_data_renders_an_honest_empty_state(): void

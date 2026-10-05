@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\Incidents;
 
 use App\Models\Incident;
+use App\Models\IncidentEvent;
+use App\Models\NotificationLog;
 use App\Models\Snapshot;
 use App\Models\User;
 use App\Models\Website;
+use Database\Seeders\DetectionRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -322,5 +325,141 @@ final class IncidentHttpTest extends TestCase
 
         $this->get(route('admin.incidents.snapshots.show', [$incident, $snapshot]))
             ->assertNotFound();
+    }
+
+    // -----------------------------------------------------------------------
+    // Incident detail UI — pagination, badges, modals, back button.
+    // -----------------------------------------------------------------------
+
+    /** Rule attribution paginates server-side at 10 rows/page, keyed by rule id. */
+    public function test_rule_attribution_paginates_at_ten_rows_per_page(): void
+    {
+        $rules = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $rules[sprintf('RULE-CNT-%03d', $i)] = [
+                'category' => 'content-fingerprint',
+                'weight' => 1,
+                'confidence' => 'low',
+                'reason' => 'reason '.$i,
+            ];
+        }
+        $incident = $this->makeIncident(['triggered_rules' => $rules]);
+        $this->actingAs($this->admin());
+
+        $response = $this->get(route('admin.incidents.show', $incident));
+        $response->assertOk();
+
+        $attribution = $response->viewData('ruleAttribution');
+        $this->assertSame(10, $attribution->perPage());
+        $this->assertSame(12, $attribution->total());
+        $this->assertCount(10, $attribution->items());
+        // Keys are preserved so each row can address its own modal.
+        $this->assertSame('RULE-CNT-001', array_key_first($attribution->items()));
+
+        $page2 = $this->get(route('admin.incidents.show', ['incident' => $incident, 'rule_page' => 2]));
+        $page2->assertOk();
+        $this->assertSame(2, $page2->viewData('ruleAttribution')->count());
+    }
+
+    /** Delivery history, timeline and snapshots each paginate at 10 rows/page. */
+    public function test_detail_sections_paginate_at_ten_rows_per_page(): void
+    {
+        $incident = $this->makeIncident();
+
+        for ($i = 0; $i < 12; $i++) {
+            NotificationLog::create([
+                'incident_id' => $incident->id,
+                'status' => 'sent',
+                'attempt' => 1,
+                'sent_at' => now(),
+            ]);
+
+            IncidentEvent::create([
+                'incident_id' => $incident->id,
+                'event_type' => 'evidence_appended',
+                'note' => 'event '.$i,
+                'created_at' => now(),
+            ]);
+
+            Snapshot::create([
+                'website_id' => $this->website->id,
+                'incident_id' => $incident->id,
+                'html_path' => "snapshots/{$this->website->id}/{$i}.html",
+                'captured_at' => now(),
+            ]);
+        }
+
+        $this->actingAs($this->admin());
+
+        $response = $this->get(route('admin.incidents.show', $incident));
+        $response->assertOk();
+
+        $this->assertSame(10, $response->viewData('deliveryLogs')->perPage());
+        $this->assertSame(12, $response->viewData('deliveryLogs')->total());
+        $this->assertSame(10, $response->viewData('timeline')->perPage());
+        $this->assertSame(12, $response->viewData('timeline')->total());
+        $this->assertSame(10, $response->viewData('snapshots')->perPage());
+        $this->assertSame(12, $response->viewData('snapshots')->total());
+    }
+
+    /** Severity and Status render as colour badges on the detail page. */
+    public function test_incident_detail_renders_severity_and_status_badges(): void
+    {
+        $incident = $this->makeIncident(['severity' => 'CRITICAL', 'status' => 'DETECTED']);
+        $this->actingAs($this->admin());
+
+        $html = (string) $this->get(route('admin.incidents.show', $incident))->assertOk()->getContent();
+
+        // CRITICAL -> danger token, DETECTED -> danger token (app conventions).
+        $this->assertStringContainsString('bg-danger-muted', $html);
+        $this->assertStringContainsString('text-danger', $html);
+    }
+
+    /** Severity and Status render as colour badges on the incidents list. */
+    public function test_incident_index_renders_severity_and_status_badges(): void
+    {
+        $this->makeIncident(['severity' => 'WARNING', 'status' => 'DETECTED']);
+        $this->actingAs($this->admin());
+
+        $html = (string) $this->get(route('admin.incidents.index'))->assertOk()->getContent();
+
+        // WARNING -> warning token.
+        $this->assertStringContainsString('bg-warning-muted', $html);
+        $this->assertStringContainsString('text-warning', $html);
+    }
+
+    /** Rule code opens a rule-details modal; reason opens the affected-checks modal. */
+    public function test_rule_code_and_reason_open_their_modals(): void
+    {
+        $this->seed(DetectionRuleSeeder::class);
+
+        $incident = $this->makeIncident([
+            'triggered_rules' => [
+                'RULE-CNT-001' => ['category' => 'content-fingerprint', 'weight' => 1, 'confidence' => 'low', 'reason' => 'Content hash changed'],
+            ],
+        ]);
+        $this->actingAs($this->admin());
+
+        $html = (string) $this->get(route('admin.incidents.show', $incident))->assertOk()->getContent();
+
+        // Rule code + reason dispatch the two modals.
+        $this->assertStringContainsString("open-modal', { name: 'rule-RULE-CNT-001' }", $html);
+        $this->assertStringContainsString("open-modal', { name: 'reason-RULE-CNT-001' }", $html);
+        // Rule registry metadata (name) is available for the modal body.
+        $this->assertStringContainsString('Homepage fingerprint / hash changed', $html);
+        // Confidence colour badge.
+        $this->assertStringContainsString('bg-surface-muted', $html);
+    }
+
+    /** "Back to incidents" is rendered as a shared ui/button, not a plain link. */
+    public function test_back_to_incidents_is_a_button(): void
+    {
+        $incident = $this->makeIncident();
+        $this->actingAs($this->admin());
+
+        $html = (string) $this->get(route('admin.incidents.show', $incident))->assertOk()->getContent();
+
+        $this->assertStringContainsString('href="'.route('admin.incidents.index').'"', $html);
+        $this->assertStringContainsString('inline-flex items-center justify-center gap-2 font-medium', $html);
     }
 }

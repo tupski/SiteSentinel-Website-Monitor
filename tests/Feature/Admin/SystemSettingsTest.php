@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Admin;
 
+use App\Http\Middleware\ApplySystemSettings;
+use App\Models\Check;
 use App\Models\Setting;
+use App\Models\SettingVersion;
 use App\Models\User;
+use App\Models\Website;
 use App\Services\Settings\SettingsRepository;
 use Database\Seeders\SettingSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -66,6 +71,39 @@ final class SystemSettingsTest extends TestCase
             ->assertSee('General')
             ->assertSee('Branding')
             ->assertSee('Timezone');
+    }
+
+    public function test_page_renders_every_logical_category(): void
+    {
+        $response = $this->actingAs($this->admin())
+            ->get(route('admin.settings.edit'))
+            ->assertOk();
+
+        foreach (['General', 'Branding', 'System', 'Monitoring & checks', 'Detection & scoring', 'Notifications', 'Retention & data', 'Security'] as $heading) {
+            $response->assertSee($heading);
+        }
+
+        // Version control surface is present.
+        $response->assertSee('Version control');
+        $response->assertSee('Pull update');
+        $response->assertSee('History');
+    }
+
+    public function test_page_is_responsive_and_theme_aware(): void
+    {
+        $html = (string) $this->actingAs($this->admin())
+            ->get(route('admin.settings.edit'))
+            ->assertOk()
+            ->getContent();
+
+        // Token surfaces (dark-mode safe) and a responsive grid.
+        $this->assertStringContainsString('bg-surface-elevated', $html);
+        $this->assertStringContainsString('border-border', $html);
+        $this->assertStringContainsString('lg:grid-cols-[1fr_20rem]', $html);
+        $this->assertStringContainsString('sm:grid-cols-2', $html);
+
+        // No legacy light-only surfaces.
+        $this->assertStringNotContainsString('bg-white shadow-sm', $html);
     }
 
     // --- Persistence -------------------------------------------------------
@@ -299,5 +337,267 @@ final class SystemSettingsTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         app(SettingsRepository::class)->set('app_key', 'sneaky');
+    }
+
+    // --- Applied-at-runtime (regression for "settings saved but not applied") ---
+
+    public function test_saved_timezone_is_applied_to_the_running_request(): void
+    {
+        $this->actingAs($this->admin())->put(route('admin.settings.update'), [
+            'site_name' => 'Judol Monitor',
+            'timezone' => 'Asia/Jakarta',
+        ])->assertRedirect(route('admin.settings.edit'));
+
+        app(SettingsRepository::class)->flush();
+
+        // Drive the middleware directly and capture the timezone observed by
+        // the downstream handler (terminate() restores it afterwards).
+        $middleware = app(ApplySystemSettings::class);
+        $request = Request::create('/admin/settings', 'GET');
+
+        $observed = null;
+        $middleware->handle($request, function () use (&$observed) {
+            $observed = date_default_timezone_get();
+
+            return response('ok');
+        });
+
+        $this->assertSame('Asia/Jakarta', $observed);
+        $this->assertSame((string) config('app.timezone'), 'Asia/Jakarta');
+
+        date_default_timezone_set('UTC');
+        config(['app.timezone' => 'UTC']);
+    }
+
+    public function test_saved_site_name_is_shared_with_views(): void
+    {
+        $this->actingAs($this->admin())->put(route('admin.settings.update'), [
+            'site_name' => 'Judol Monitor',
+            'timezone' => 'UTC',
+        ]);
+
+        $response = $this->get(route('admin.settings.edit'))->assertOk();
+
+        $response->assertSee('Judol Monitor', false);
+    }
+
+    public function test_saved_retention_window_is_consumed_by_pruning(): void
+    {
+        $admin = $this->admin();
+
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'Judol Monitor',
+            'timezone' => 'UTC',
+            'retention_checks_days' => 60,
+        ])->assertRedirect(route('admin.settings.edit'));
+
+        app(SettingsRepository::class)->flush();
+        $this->assertSame(60, app(SettingsRepository::class)->int(SettingsRepository::RETENTION_CHECKS_DAYS));
+
+        // A 45-day-old check survives the 60-day window, an 61-day-old is pruned.
+        $website = Website::factory()->create();
+        $kept = $this->agedCheck($website, 'kept', 45);
+        $pruned = $this->agedCheck($website, 'pruned', 61);
+
+        $this->artisan('model:prune', ['--model' => [Check::class]])->assertExitCode(0);
+
+        $this->assertDatabaseHas('checks', ['id' => $kept->id]);
+        $this->assertDatabaseMissing('checks', ['id' => $pruned->id]);
+    }
+
+    public function test_saved_scoring_threshold_is_consumed_by_the_rule_engine(): void
+    {
+        $admin = $this->admin();
+
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'Judol Monitor',
+            'timezone' => 'UTC',
+            'scoring_threshold_info' => 5,
+        ])->assertRedirect(route('admin.settings.edit'));
+
+        app(SettingsRepository::class)->flush();
+
+        $this->assertSame(5, app(SettingsRepository::class)->int(SettingsRepository::SCORING_THRESHOLD_INFO));
+    }
+
+    public function test_middleware_restores_the_previous_timezone_on_terminate(): void
+    {
+        $original = date_default_timezone_get();
+
+        app(SettingsRepository::class)->set(SettingsRepository::TIMEZONE, 'Asia/Jakarta');
+
+        $middleware = app(ApplySystemSettings::class);
+        $request = Request::create('/admin/settings', 'GET');
+
+        $middleware->handle($request, fn () => response('ok'));
+
+        $this->assertSame('Asia/Jakarta', date_default_timezone_get());
+
+        $middleware->terminate($request, response('ok'));
+
+        $this->assertSame($original, date_default_timezone_get());
+    }
+
+    private function agedCheck(Website $website, string $key, int $days): Check
+    {
+        $check = new Check([
+            'website_id' => $website->id,
+            'check_key' => $key,
+            'started_at' => now()->subDays($days),
+        ]);
+        $check->created_at = now()->subDays($days);
+        $check->save();
+
+        return $check;
+    }
+
+    // --- Version control (ADR-043) -----------------------------------------
+
+    public function test_saving_creates_a_version_snapshot(): void
+    {
+        $admin = $this->admin();
+
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'Judol Monitor',
+            'timezone' => 'UTC',
+        ])->assertRedirect(route('admin.settings.edit'));
+
+        $this->assertDatabaseHas('setting_versions', [
+            'source' => 'save',
+            'author_id' => $admin->id,
+        ]);
+
+        $version = SettingVersion::query()->orderByDesc('version')->first();
+        $this->assertNotNull($version);
+        $this->assertSame('Judol Monitor', $version->snapshot['site_name']);
+    }
+
+    public function test_identical_consecutive_saves_do_not_duplicate_versions(): void
+    {
+        $admin = $this->admin();
+        $payload = ['site_name' => 'Judol Monitor', 'timezone' => 'UTC'];
+
+        $this->actingAs($admin)->put(route('admin.settings.update'), $payload);
+        $this->actingAs($admin)->put(route('admin.settings.update'), $payload);
+
+        $this->assertSame(1, SettingVersion::query()->count());
+    }
+
+    public function test_rollback_restores_a_previous_version(): void
+    {
+        $admin = $this->admin();
+
+        // v1: the initial state.
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'First Name',
+            'timezone' => 'UTC',
+        ]);
+        $v1 = SettingVersion::query()->orderBy('version')->first();
+
+        // v2: change the name.
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'Second Name',
+            'timezone' => 'UTC',
+        ]);
+
+        $this->assertSame('Second Name', Setting::query()->where('key', 'site_name')->value('value'));
+
+        // Roll back to v1.
+        $this->actingAs($admin)
+            ->post(route('admin.settings.rollback', $v1))
+            ->assertRedirect(route('admin.settings.edit'));
+
+        $this->assertSame('First Name', Setting::query()->where('key', 'site_name')->value('value'));
+        $this->assertDatabaseHas('setting_versions', ['source' => 'rollback']);
+        $this->assertDatabaseHas('audit_logs', ['event' => 'settings.rolled_back']);
+    }
+
+    public function test_pull_update_refreshes_to_the_latest_known_state(): void
+    {
+        $admin = $this->admin();
+
+        // Create a version, then diverge the live settings directly.
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'Known Good',
+            'timezone' => 'UTC',
+        ]);
+
+        app(SettingsRepository::class)->set(SettingsRepository::SITE_NAME, 'Drifted');
+        app(SettingsRepository::class)->flush();
+
+        // Pull reloads the most recent stored snapshot.
+        $this->actingAs($admin)
+            ->post(route('admin.settings.pull'))
+            ->assertRedirect(route('admin.settings.edit'));
+
+        $this->assertDatabaseHas('settings', ['key' => 'site_name', 'value' => 'Known Good']);
+        $this->assertDatabaseHas('audit_logs', ['event' => 'settings.pulled']);
+    }
+
+    public function test_pull_update_applies_a_configured_upstream_file(): void
+    {
+        $admin = $this->admin();
+        $path = tempnam(sys_get_temp_dir(), 'sentinel-settings-');
+        file_put_contents($path, json_encode([
+            'site_name' => 'From Upstream',
+            'retention.checks_days' => 90,
+            // An unknown key must never be applied.
+            'app_key' => 'attacker',
+        ]));
+
+        config(['sentinel.settings.upstream_path' => $path]);
+
+        try {
+            $this->actingAs($admin)
+                ->post(route('admin.settings.pull'))
+                ->assertRedirect(route('admin.settings.edit'));
+
+            $this->assertDatabaseHas('settings', ['key' => 'site_name', 'value' => 'From Upstream']);
+            $this->assertDatabaseHas('settings', ['key' => 'retention.checks_days', 'value' => '90']);
+            $this->assertDatabaseMissing('settings', ['key' => 'app_key']);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_pull_and_rollback_are_admin_only(): void
+    {
+        $viewer = User::factory()->create();
+        $viewer->forceFill(['role' => 'viewer'])->save();
+
+        $version = SettingVersion::query()->create([
+            'version' => 1,
+            'snapshot' => ['site_name' => 'X'],
+            'checksum' => 'abc',
+            'source' => 'save',
+        ]);
+
+        $this->actingAs($viewer)->post(route('admin.settings.pull'))->assertForbidden();
+        $this->actingAs($viewer)->post(route('admin.settings.rollback', $version))->assertForbidden();
+    }
+
+    public function test_rollback_numeric_settings_restore_the_snapshot_value(): void
+    {
+        $admin = $this->admin();
+
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'Judol Monitor',
+            'timezone' => 'UTC',
+            'notifications_default_cooldown_minutes' => 30,
+        ]);
+        $v1 = SettingVersion::query()->orderBy('version')->first();
+
+        $this->actingAs($admin)->put(route('admin.settings.update'), [
+            'site_name' => 'Judol Monitor',
+            'timezone' => 'UTC',
+            'notifications_default_cooldown_minutes' => 5,
+        ]);
+
+        $this->actingAs($admin)->post(route('admin.settings.rollback', $v1));
+
+        $this->assertDatabaseHas('settings', [
+            'key' => 'notifications.default_cooldown_minutes',
+            'value' => '30',
+        ]);
     }
 }

@@ -7,6 +7,8 @@
     'valueSuffix' => '',
     'height' => 180,
     'tooltips' => true,
+    'table' => true,
+    'axisLabel' => null,
 ])
 
 @php
@@ -15,18 +17,29 @@
     // renders an explicit empty state. The chart is responsive via viewBox +
     // preserveAspectRatio + `w-full max-w-full` (it can never push the page
     // into horizontal overflow), theme-aware via `currentColor`, and carries
-    // BOTH an accessible <title>/aria-label and a visible data table fallback.
+    // BOTH an accessible <title>/aria-label and (unless `table` is disabled) a
+    // visible data table fallback.
+    //
+    // Axes: the bottom axis is a labelled time/step axis. Each point may carry
+    // a dedicated `axis` string (the value rendered under its bar, e.g. the
+    // coarse time a check ran) while `label` stays the tooltip/table name (e.g.
+    // the website). When `axis` is absent the point `label` is used, so the
+    // existing availability/incident charts gain bottom labels for free.
     //
     // Tooltips: every bar gets a native `<title>` (works without JS, read by
     // assistive tech) AND, when `tooltips` is enabled, a styled hover/focus
     // tooltip driven by the registered `chartTooltip` Alpine component
     // (logic lives in app.js — never inline — per AGENTS.md §7).
     $points = collect($series)->values()->map(static function ($point): array {
+        $point = (array) $point;
+        $label = (string) ($point['label'] ?? '');
+
         return [
-            'label' => (string) ($point['label'] ?? ''),
+            'label' => $label,
+            'axis' => (string) ($point['axis'] ?? $label),
             'value' => (float) ($point['value'] ?? 0),
-            'up' => array_key_exists('up', (array) $point) ? (int) $point['up'] : null,
-            'total' => array_key_exists('total', (array) $point) ? (int) $point['total'] : null,
+            'up' => array_key_exists('up', $point) ? (int) $point['up'] : null,
+            'total' => array_key_exists('total', $point) ? (int) $point['total'] : null,
         ];
     })->all();
 
@@ -42,9 +55,11 @@
     $viewW = 600;
     $viewH = max(80, (int) $height);
     $padTop = 16;
-    $padBottom = 30;
-    $padLeft = 10;
-    $padRight = 10;
+    // Room under the plot for the tick labels + the axis caption.
+    $padBottom = 46;
+    // Room on the left for the y-axis value labels.
+    $padLeft = 38;
+    $padRight = 12;
     $plotW = $viewW - $padLeft - $padRight;
     $plotH = $viewH - $padTop - $padBottom;
 
@@ -58,6 +73,7 @@
 
     $bars = [];
     $linePoints = [];
+    $centers = [];
     foreach ($points as $i => $point) {
         $ratio = $point['value'] / $scaleMax;
         $h = max(0.0, min(1.0, $ratio)) * $plotH;
@@ -65,12 +81,28 @@
         $x = $slotCenter - ($barW / 2);
         $y = $padTop + ($plotH - $h);
         $bars[] = ['x' => round($x, 2), 'y' => round($y, 2), 'w' => round($barW, 2), 'h' => round($h, 2)];
+        $centers[] = round($slotCenter, 2);
 
         $linePoints[] = round($slotCenter, 2).','.round($y, 2);
     }
     $linePointsStr = implode(' ', $linePoints);
 
     $baselineY = $padTop + $plotH;
+
+    // Y-axis gridlines (0 / mid / max) so a taller bar reads as "slower".
+    $gridLines = [];
+    $gridSteps = 2;
+    for ($g = 0; $g <= $gridSteps; $g++) {
+        $value = $scaleMax * ($g / $gridSteps);
+        $gridLines[] = [
+            'y' => round($padTop + $plotH - ($plotH * ($g / $gridSteps)), 2),
+            'text' => $formatValue($value),
+        ];
+    }
+
+    // Thin the bottom ticks so labels never overlap (max ~8 visible).
+    $tickEvery = $count > 8 ? (int) ceil($count / 8) : 1;
+
     $ariaLabel = trim((string) ($title ?? $caption ?? 'Chart'));
     $ariaLabel .= ' — '.$count.' '.($count === 1 ? 'data point' : 'data points');
 @endphp
@@ -96,7 +128,15 @@
             >
                 <title>{{ $ariaLabel }}</title>
 
-                {{-- Axis + baseline (semantic tokens, inherits the theme). --}}
+                {{-- Y-axis gridlines + value labels (semantic tokens, both themes). --}}
+                @foreach ($gridLines as $grid)
+                    <line x1="{{ $padLeft }}" y1="{{ $grid['y'] }}" x2="{{ $viewW - $padRight }}" y2="{{ $grid['y'] }}"
+                          class="text-border" stroke="currentColor" stroke-width="1" opacity="0.4" />
+                    <text x="{{ $padLeft - 6 }}" y="{{ $grid['y'] + 3 }}" text-anchor="end"
+                          class="text-text-subtle" fill="currentColor" font-size="10">{{ $grid['text'] }}</text>
+                @endforeach
+
+                {{-- Bottom axis baseline. --}}
                 <line x1="{{ $padLeft }}" y1="{{ $baselineY }}" x2="{{ $viewW - $padRight }}" y2="{{ $baselineY }}"
                       class="text-border" stroke="currentColor" stroke-width="1" opacity="0.6" />
 
@@ -135,6 +175,19 @@
                         </rect>
                     @endforeach
                 @endif
+
+                {{-- Bottom axis tick labels: the time/step each point was checked. --}}
+                @foreach ($points as $i => $point)
+                    @if ($tickEvery === 1 || $i % $tickEvery === 0 || $i === $count - 1)
+                        <text x="{{ $centers[$i] }}" y="{{ $baselineY + 14 }}" text-anchor="middle"
+                              class="text-text-subtle" fill="currentColor" font-size="10">{{ $point['axis'] }}</text>
+                    @endif
+                @endforeach
+
+                @if ($axisLabel)
+                    <text x="{{ $viewW / 2 }}" y="{{ $viewH - 4 }}" text-anchor="middle"
+                          class="text-text-subtle" fill="currentColor" font-size="10">{{ $axisLabel }}</text>
+                @endif
             </svg>
 
             @if ($tooltips)
@@ -164,26 +217,28 @@
             <figcaption class="mt-2 text-xs text-text-muted">{{ $caption }}</figcaption>
         @endif
 
-        {{-- Visible fallback table: the underlying numbers, always readable
-             without the chart (accessibility + "no fabricated data"). --}}
-        <div class="mt-3 overflow-x-auto">
-            <table class="min-w-full text-left text-xs text-text-muted">
-                <caption class="sr-only">{{ $title ?? $caption ?? __('Chart data') }}</caption>
-                <thead>
-                    <tr class="text-text-subtle">
-                        <th scope="col" class="py-1 pr-4 font-medium">{{ __('Label') }}</th>
-                        <th scope="col" class="py-1 font-medium">{{ __('Value') }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($points as $point)
-                        <tr class="border-t border-border">
-                            <td class="py-1 pr-4">{{ $point['label'] }}</td>
-                            <td class="py-1 tabular-nums">{{ $formatValue($point['value']) }}</td>
+        @if ($table)
+            {{-- Visible fallback table: the underlying numbers, always readable
+                 without the chart (accessibility + "no fabricated data"). --}}
+            <div class="mt-3 overflow-x-auto">
+                <table class="min-w-full text-left text-xs text-text-muted">
+                    <caption class="sr-only">{{ $title ?? $caption ?? __('Chart data') }}</caption>
+                    <thead>
+                        <tr class="text-text-subtle">
+                            <th scope="col" class="py-1 pr-4 font-medium">{{ __('Label') }}</th>
+                            <th scope="col" class="py-1 font-medium">{{ __('Value') }}</th>
                         </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        </div>
+                    </thead>
+                    <tbody>
+                        @foreach ($points as $point)
+                            <tr class="border-t border-border">
+                                <td class="py-1 pr-4">{{ $point['label'] }}</td>
+                                <td class="py-1 tabular-nums">{{ $formatValue($point['value']) }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
     @endif
 </figure>

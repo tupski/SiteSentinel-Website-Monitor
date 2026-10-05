@@ -6,6 +6,7 @@ namespace App\Services\Detection;
 
 use App\Models\Check;
 use App\Models\Snapshot;
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -49,7 +50,7 @@ final class SnapshotWriter
                 'redirect_chain' => $check->redirect_chain,
                 'size_bytes' => strlen($body),
                 'captured_at' => now(),
-                'expires_at' => now()->addDays((int) config('sentinel.retention.snapshots_days', 14)),
+                'expires_at' => now()->addDays((int) settings(SettingsRepository::RETENTION_SNAPSHOTS_DAYS)),
             ]);
         } catch (Throwable $e) {
             // Observable, never silent, never fatal to the monitoring check.

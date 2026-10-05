@@ -102,4 +102,38 @@ final class ChartComponentTest extends TestCase
         $this->assertStringContainsString('<title>a: 1</title>', $raw);
         $this->assertStringNotContainsString('chartTooltip', $raw);
     }
+
+    public function test_bottom_axis_renders_per_point_labels_and_an_axis_caption(): void
+    {
+        $html = $this->blade(
+            '<x-ui.chart type="bar" title="Response time" axis-label="Time checked (UTC)" :series="$series" />',
+            ['series' => [
+                ['label' => 'Alpha', 'axis' => '10:00', 'value' => 200],
+                ['label' => 'Bravo', 'axis' => '11:00', 'value' => 400],
+            ]]
+        );
+
+        $raw = (string) $html;
+
+        // Each point renders its own bottom-axis tick (the time it was checked).
+        $this->assertStringContainsString('>10:00</text>', $raw);
+        $this->assertStringContainsString('>11:00</text>', $raw);
+        // The axis caption labels what the bottom axis means.
+        $this->assertStringContainsString('Time checked (UTC)', $raw);
+    }
+
+    public function test_data_table_can_be_disabled(): void
+    {
+        $html = $this->blade(
+            '<x-ui.chart type="bar" title="Response time" :table="false" :series="$series" />',
+            ['series' => [['label' => 'Alpha', 'value' => 200]]]
+        );
+
+        $raw = (string) $html;
+
+        // The SVG still renders, but the label/value fallback table is gone.
+        $this->assertStringContainsString('<svg', $raw);
+        $this->assertStringNotContainsString('<table', $raw);
+        $this->assertStringNotContainsString('<caption', $raw);
+    }
 }

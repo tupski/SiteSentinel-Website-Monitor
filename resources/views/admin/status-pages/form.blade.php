@@ -84,7 +84,7 @@
 
             <div class="flex items-center gap-3">
                 <x-ui.button type="submit" variant="primary">{{ __('Save') }}</x-ui.button>
-                <a href="{{ route('admin.status-pages.index') }}" class="text-sm text-text-muted underline hover:text-text">{{ __('Cancel') }}</a>
+                <x-ui.button :href="route('admin.status-pages.index')" variant="secondary">{{ __('Cancel') }}</x-ui.button>
             </div>
         </form>
     </div>

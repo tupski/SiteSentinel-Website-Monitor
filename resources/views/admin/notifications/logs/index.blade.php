@@ -1,9 +1,11 @@
 <x-admin-layout>
     <x-slot name="title">{{ __('Delivery log') }} — SiteSentinel</x-slot>
 
-    <div class="mb-6 flex items-center justify-between">
+    <div class="mb-6 flex items-center justify-between gap-4">
         <h1 class="text-2xl font-bold tracking-tight text-text">{{ __('Delivery log') }}</h1>
-        <a href="{{ route('admin.notifications.index') }}" class="text-sm text-text-muted underline hover:text-text">{{ __('Back to channels') }}</a>
+        <x-ui.button :href="route('admin.notifications.index')" variant="secondary" size="sm">
+            {{ __('Back to channels') }}
+        </x-ui.button>
     </div>
 
     <form method="GET" action="{{ route('admin.notification-logs.index') }}" class="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-elevated p-4 shadow-sm">

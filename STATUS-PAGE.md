@@ -316,6 +316,13 @@ notification configuration, delivery logs, and failure states.
   (`band_normal = 800`, `band_slow = 2500`; config `sentinel.status_page`, overridable via
   `SENTINEL_STATUS_BAND_NORMAL` / `SENTINEL_STATUS_BAND_SLOW`). The band is omitted when there is no
   timing. The exact millisecond value is never emitted.
+- A **coarse response-time figure + coarse check time** for the public response-time chart
+  (UI rework): each published website with a timed check in the reporting window contributes one bar,
+  whose height is a **rounded** millisecond figure and whose bottom-axis label is a coarse UTC time
+  bucket (`H:00` for 24h, `Y-m-d` otherwise). The figure is `duration_ms` rounded to the nearest
+  `response_round_ms` (default **50 ms**; config `sentinel.status_page`, overridable via
+  `SENTINEL_STATUS_RESPONSE_ROUND_MS`), so the **exact** value is never emitted — only the rounded
+  band-level signal. A website with no timed check contributes no bar (never a fabricated one).
 - A coarse **incident** indication **only** where §5 permits it.
 
 ### 4.4 Worked before/after example
@@ -590,6 +597,34 @@ flowchart TD
 | **Incident section** | Active incidents as coarse label + time bucket | No type/severity/evidence |
 | **Last-updated** | A single page-level "updated at" timestamp — a **precise UTC ISO-8601** value rendered in the visitor's local timezone (ADR-040), plus the coarse day bucket | The precise value is the **projection generation stamp only**; never an incident/check timestamp |
 | **Footer** | Optional custom footer text | MUST NOT leak version/internal paths |
+
+**Implemented website rows (Phase 11 UI rework).** Each service card renders its **display name on
+the left with its coarse status badge inline and right-aligned on the same row** (the badge sits to
+the right of the site name). Below the name row the card shows the sample-based uptime / failed-check
+count on the left and the day bucket on the right. The per-card availability chart is **not**
+rendered; instead a single page-level **response-time chart** is drawn once for the whole page.
+
+**Implemented response-time chart (Phase 11 UI rework).** A single server-rendered inline-SVG bar
+chart (`status._response_chart`, built on `<x-ui.chart>`, ADR-037 — no JS chart library) renders:
+
+- **one bar per published website with a timed check** in the reporting window (a website with no
+  timed check contributes no bar);
+- **a taller bar = a slower response** (height is the rounded `responseMs` figure, §4.3);
+- a **bottom axis of the coarse time each site was checked** (`checkedAt`), labelled
+  "Time checked (UTC)"; and
+- a native `<title>` tooltip per bar plus the shared Alpine `chartTooltip` hover layer (accessible +
+  responsive; correct in light and dark mode via `currentColor` + semantic tokens).
+
+The chart's visible **label/value fallback table is intentionally disabled** on the public page (the
+tooltips + bottom axis carry the meaning). The chart renders **nothing** (no fabricated series) when
+no published website has a timed check. Both the coarse `responseMs` and `checkedAt` are allowlisted
+fields on each service in the DTO/JSON (§4.3); the exact `checks.duration_ms` value is never emitted.
+
+**Implemented period pills (Phase 11 UI rework).** The period filter is server-rendered links. The
+**active** pill pairs `bg-primary` with the flip-aware `text-primary-foreground` token so its label
+is dark on the light `--primary` surface in dark mode (and light on the dark `--primary` surface in
+light mode); a hard-coded `text-white` would be unreadable in dark mode. Inactive pills use
+`bg-surface-elevated` + `text-text-muted`, readable in both themes.
 
 ### 8.2 Auto-refresh
 

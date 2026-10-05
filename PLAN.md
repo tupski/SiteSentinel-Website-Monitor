@@ -864,6 +864,17 @@ notification pipeline — plus a dedicated step-by-step Telegram Bot setup (BotF
 `/start` → channel fields → enable → test → verify) and troubleshooting. Read-only, no business logic
 change; see CHANGELOG for details.
 
+### Addendum — Documentation page rework (Laravel-framework-docs style)
+
+The Documentation page was later reworked to render in a **dedicated, standalone docs shell** (separate from
+the admin app shell), modelled on `laravel.com/framework/docs`. It adds a grouped left sidebar, a centred
+content column with `#` anchored headings, a right "On this page" table of contents, a header search, a version
+selector and the theme toggle. The grid is **3 columns** at `xl` (sidebar + content + TOC), **2 columns** at
+`lg` (sidebar + content) and a **single column** on mobile with the sidebar + TOC in an off-canvas drawer. The
+grouped navigation, anchors and TOC are all derived from [`config/documentation.php`](config/documentation.php)
+so they cannot drift. Access rules are unchanged (still admin-only). Read-only, no business logic change; see
+the CHANGELOG for details.
+
 ### Risks / Watch-outs
 
 - Cooldown state must survive restarts (`NFR-09`) — persist in `notification_cooldowns`, not memory.

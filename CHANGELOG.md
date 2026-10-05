@@ -1,5 +1,233 @@
 # Changelog
 
+## [Unreleased] — Documentation page rework (Laravel-framework-docs style)
+
+### Changed
+
+- **The Documentation page (`GET admin/documentation`, `admin.documentation`) now renders in a dedicated,
+  standalone docs shell instead of the admin app shell.** It mirrors
+  [laravel.com/framework/docs](https://laravel.com/framework/docs): its own header (brand → docs home, client
+  search, version selector, return-to-app link, theme toggle), a **grouped left sidebar**, a centred content
+  column with clickable `#` anchored headings, and a right **"On this page"** table of contents that highlights
+  the current section as you scroll. The admin sidebar (`#admin-sidebar`) and its chrome no longer appear on
+  this page.
+  - New dedicated layout [`resources/views/components/docs-layout.blade.php`](resources/views/components/docs-layout.blade.php)
+    (`<x-docs-layout>`), separate from [`x-admin-layout`](resources/views/components/admin-layout.blade.php).
+  - **Responsive 3 / 2 / 1 columns:** `xl` = sidebar + content + TOC (`xl:grid-cols-[16rem_minmax(0,1fr)_16rem]`),
+    `lg` = sidebar + content (`lg:grid-cols-[16rem_minmax(0,1fr)]`), and a single column below `lg` where the
+    sidebar + TOC move into an off-canvas drawer opened by a labelled hamburger (`data-docs-menu-toggle`,
+    `#docs-nav-drawer`, focus-trapped, Escape-to-close).
+  - **Content is preserved, not rewritten.** The Phase 7 guide (Getting Started incl. the two-dimension model
+    and `HTTP 200 ≠ healthy`, Telegram Bot setup, Navigation, Monitoring, Detection, Notifications, Status
+    pages, Security, Settings, Profile, Troubleshooting) is reachable through the new grouped sidebar and TOC.
+  - **Search** filters the sidebar links, the TOC entries and the content sections together (client-side; no
+    network round-trip — server search remains out of scope), with a live `aria-live` result count.
+  - **Version selector** is a presentational dropdown backed by `config/documentation.php` (`version`, a static
+    `0.1.x` label matching the project's docs milestone tag, plus a `main (unreleased)` placeholder). It is
+    deliberately NOT a persisted setting (no new settings key; no migration).
+  - **Light/dark parity** reuses the existing no-FOUC theme bootstrap (`partials.theme-bootstrap`) and the
+    semantic tokens, plus the shared `<x-theme-switcher>`; new docs CSS in
+    [`resources/css/app.css`](resources/css/app.css) is token-driven, so there is no `dark:` duplication.
+
+### Added
+
+- [`config/documentation.php`](config/documentation.php) — the single source of truth for the grouped docs
+  sidebar (and the `main()` anchors/TOC derived from it). A test asserts nav config ↔ rendered sections never
+  drift.
+- [`resources/views/docs/sections/*`](resources/views/docs/sections) — the guide content as Blade section
+  partials (`prologue`, `getting-started`, `basics`, `digging-deeper`, `operations`), plus
+  [`docs/partials/nav.blade.php`](resources/views/docs/partials/nav.blade.php),
+  [`docs/partials/toc.blade.php`](resources/views/docs/partials/toc.blade.php) and the anchored-heading
+  component [`components/docs/partials/anchor.blade.php`](resources/views/components/docs/partials/anchor.blade.php).
+- Client behaviour in [`resources/js/app.js`](resources/js/app.js) as the `docsShell` Alpine component: search
+  filtering, `IntersectionObserver` scroll-spy (with a passive-scroll fallback), and the mobile drawer with
+  focus management — all local UI state, matching the existing `sidebar`/`menu` component style.
+- [`tests/Feature/Ui/DocumentationLayoutTest.php`](tests/Feature/Ui/DocumentationLayoutTest.php) — proves the
+  dedicated layout renders (and the admin shell does **not**), the 3/2/1-column regions and their responsive
+  classes exist, grouped nav + TOC render one entry per configured section, every section has a `#` anchor and
+  a matching content region, the mobile toggle is wired, the existing content is still reachable, and the
+  client behaviour is registered.
+
+### Notes
+
+- **Access rules unchanged:** the route keeps its `auth` + `session.timeouts` + `admin` middleware and remains
+  admin-only (guest → login, non-admin/disabled → 403). Only the presentation changed.
+- `tests/Feature/Ui/AdminSidebarTest.php`: the `documentation` case was removed from the active-nav provider —
+  the docs page no longer renders the admin sidebar, so there is no admin nav item to mark `aria-current`
+  there (the sidebar still *links* to docs, which remains asserted).
+
+### Verification
+
+- `vendor/bin/pint --dirty` clean; full suite **849 passed** (5183 assertions); `npm run build` succeeds.
+
+## [Unreleased — superseded] — Public status page: response-time chart, badge placement, dark-mode pill fix
+
+### Changed
+
+- **The public status page now shows a single response-time bar chart** instead of a per-service
+  availability chart. One bar per **checked** website, **taller = slower**, with the **bottom axis
+  being the time each site was checked** (`H:00` for 24h, `Y-m-d` otherwise). It is a server-rendered
+  inline-SVG chart (`resources/views/status/_response_chart.blade.php` on `<x-ui.chart>`, ADR-037 —
+  no JS chart library), accessible (native `<title>` per bar + the `chartTooltip` hover layer +
+  `role="img"`), responsive, and correct in light and dark mode via `currentColor` + semantic tokens.
+  A website with no timed check contributes no bar (never a fabricated series).
+- **The label/value fallback table that accompanied the chart is removed** from the public page
+  (`<x-ui.chart :table="false">`); the chart component keeps the table for its other callers.
+- **Status badges moved to the right of the site name.** In each service card the display name is on
+  the left and its coarse status badge (`Degraded`, `Incident`, …) is inline and right-aligned on the
+  same row (`resources/views/status/_service.blade.php`).
+- **Dark-mode active period pill fix.** The active filter pill now pairs `bg-primary` with the
+  flip-aware `text-primary-foreground` token instead of a hard-coded `text-white`. In dark mode
+  `--primary` is a light surface, so the label renders **dark and readable**; light mode renders it
+  light on the dark surface. Inactive pills stay `bg-surface-elevated` + `text-text-muted`.
+
+### Added
+
+- **Coarse, public-safe response-time signal in the status DTO.** Each service may carry a
+  `responseMs` (the `checks.duration_ms` figure **rounded** to the nearest
+  `sentinel.status_page.response_round_ms`, default **50 ms**) and a coarse `checkedAt` UTC bucket —
+  never the exact millisecond value (STATUS-PAGE.md §4.3). Read in one batched query over the same
+  window as the availability history, so the cache payload and invalidation path are unchanged.
+- New config `sentinel.status_page.response_round_ms` (`SENTINEL_STATUS_RESPONSE_ROUND_MS`, default
+  `50`) controlling the public rounding step.
+- New `<x-ui.chart>` props `axisLabel` (bottom-axis caption) and `table` (render the fallback table,
+  default `true`); each series point may carry an `axis` string for its bottom-axis tick.
+- New `tests/Feature/StatusPage/StatusPageResponseChartTest.php` (bar-per-checked-website + time
+  axis, table removed, badge to the right of the name, dark-mode pill token, coarse JSON signal) and
+  two new `ChartComponentTest` cases (bottom axis labels/caption; `:table="false"`).
+
+## [Unreleased] — Admin dashboard: table alignment, 10-item cap, view-all links
+
+### Changed
+
+- **Availability and Security & Content Health tables now align flush with the dashboard
+  layout.** Both render through `<x-ui.table :flush="true">` so the nested bordered card is
+  dropped and the table's left edge lines up with the section heading / first column (the
+  section already supplies the border + padding). No other dashboard widget changed.
+- **Both tables are capped at 10 rows** by
+  [`AdminDashboardController`](app/Http/Controllers/AdminDashboardController.php)
+  (`TABLE_LIMIT`), which now `->limit(10)`s the shared `$websites` collection while exposing the
+  uncapped `websiteTotal`. The four summary counters are computed from real `count()` queries so
+  they still reflect the full fleet, never the capped table collection.
+- When the fleet exceeds 10 rows each section shows a "View all" link and hides it otherwise:
+  - **View all availability** → `admin.websites.index` (`?status=UP`), the availability list.
+  - **View all security & content health** → `admin.websites.index`, the full monitored-websites
+    list (the canonical page exposing `status_security`).
+
+### Tests
+
+- `AdminDashboardTest` extended: tables cap at 10 rows while `websiteTotal` / `counters.total`
+  reflect the full fleet; the "View all" links appear only when more than 10 websites exist and
+  point at the correct related list pages.
+
+## [Unreleased] — Settings page rework: applied-at-runtime fix, categories, version control (ADR-043)
+
+### Fixed
+
+- **"Settings saved but not applied" bug.** The `settings` table was written by the admin
+  Settings page but **no runtime consumer ever read it**: `SettingsRepository`/`settings()`
+  were wired to nothing, and branding, timezone, retention, scoring thresholds, cooldowns,
+  monitoring thresholds and auth/session tuning all read `config()`/hardcoded values. The fix
+  routes every consumer through the single `SettingsRepository` accessor (directly or via the
+  `settings()` helper), so a stored row wins and an absent row degrades to the same
+  config-derived default (no behaviour change on a fresh install):
+  - New [`ApplySystemSettings`](app/Http/Middleware/ApplySystemSettings.php) web middleware
+    applies the stored **timezone** (to PHP + Carbon) and shares **site name / description /
+    logo / favicon** with all views; the admin layout, sidebar, app layout and login page now
+    render them (they were hardcoded to `SiteSentinel`). The previous timezone is restored on
+    `terminate()` so long-lived workers/tests do not leak it.
+  - Rewired consumers: `Check`/`Incident`/`NotificationLog`/`Snapshot` pruning windows,
+    `SnapshotWriter` TTL, `IncidentEngine` (failure/recovery thresholds),
+    `RuleEngine` (score bands + correlation guard), `NotificationDispatcher` (cooldown),
+    `LoginController` + `PasswordResetController` + `UpdatePasswordRequest` +
+    `StatusPageRequest` + `UpdateStatusPageSettingsRequest` + `InstallAdminCommand`
+    (min password length, login throttle/lockout), `EnforceSessionTimeouts`
+    (idle/absolute session timeouts), and the website form defaults.
+  - The repository memo is now **version-aware** so a long-lived queue worker observes a change
+    made in a web request without a restart; `flush()` still bumps the version counter for O(1)
+    cache invalidation.
+
+### Added
+
+- **Settings categorization.** The Settings page now groups every registered key into cards —
+  General, Branding, System, Monitoring & checks, Detection & scoring, Notifications,
+  Retention & data, Security — driven by the key registry (`SettingsRepository::groups()` /
+  `grouped()`), so the page and the registry cannot drift. Responsive two-column layout
+  (`lg:grid-cols-[1fr_20rem]`, `sm:grid-cols-2`) and token-based surfaces (dark-mode safe).
+- **Settings version control (ADR-043).** New `setting_versions` table
+  ([`0001_12_03_000000_create_setting_versions_table.php`](database/migrations/0001_12_03_000000_create_setting_versions_table.php))
+  stores immutable full-map snapshots (`version`, `label`, `snapshot` JSON, `checksum`,
+  `source`, `author_id`). [`SettingsVersionService`](app/Services/Settings/SettingsVersionService.php)
+  writes a snapshot on every save and powers:
+  - **Pull update** (`POST admin/settings/pull`) — reconciles the live settings to the configured
+    upstream (`config('sentinel.settings.upstream_path')` JSON file) or the latest stored
+    snapshot, falling back to config defaults. **Never makes an outbound call** (PRD AC-23,
+    no telemetry); unknown keys are ignored. The current state is snapshotted first.
+  - **Rollback** (`POST admin/settings/versions/{settingVersion}/rollback`) — restores a chosen
+    version; the current state is snapshotted first, so a rollback is itself reversible.
+- New audit events `settings.pulled` and `settings.rolled_back`
+  ([`AuditEvent`](app/Services/Audit/AuditEvent.php), documented in SECURITY.md §9.1) with
+  `{source, applied, version}` / `{from_version, to_version, applied}` metadata (never values).
+- New [`SettingVersion`](app/Models/SettingVersion.php) model; `SettingSeeder` now seeds every
+  non-null registered default.
+
+### Tests
+
+- `SystemSettingsTest` extended (30 tests): runtime application (timezone middleware, shared
+  branding, retention pruning, scoring threshold), categorization rendering, responsive/theme
+  checks, version snapshot creation, dedupe, rollback (string + numeric), pull (latest snapshot
+  and upstream file), and admin-only authorization for pull/rollback.
+- `CsrfSessionTest` now asserts the new settings routes are POST-only (state-changing).
+
+### Notes / limitations
+
+- "Pull update" is deliberately local-only (a JSON file path or the latest stored snapshot);
+  this is a self-hosted, telemetry-free app, so there is no remote registry to fetch from. Point
+  `SENTINEL_SETTINGS_UPSTREAM_PATH` at a git-tracked/synced file to drive it from your own
+  tooling.
+- The pre-existing `AdminDashboardTest::test_dashboard_is_turbo_friendly` failure (asserts
+  `assets/app` in the Vite dev markup) is unrelated to this change and reproduces on the base
+  revision.
+
+## [Unreleased] — Incident Details page polish (alignment, pagination, badges, modals, back buttons)
+
+### Changed
+
+- **Incident detail (`admin.incidents.show`) sections paginate server-side at 10 rows/page.**
+  [`IncidentController::show()`](app/Http/Controllers/Admin/IncidentController.php) now paginates
+  Rule attribution (manual `LengthAwarePaginator` over the `triggered_rules` map, keys preserved),
+  Delivery history (`delivery_page`), Timeline (`timeline_page`) and Evidence snapshots
+  (`snapshots_page`). Each paginator uses `withQueryString()`, so filters/query strings survive.
+- **Rule attribution and Delivery history tables align flush** with their section heading / first
+  column. Both now render through `<x-ui.table :flush="true">`, which drops the nested bordered card
+  and its left inset while keeping the horizontal-scroll container.
+- **Severity and Status are colour badges** on the incident detail Summary and the incidents list
+  table, using the existing `x-ui/badge` component and the app's palette
+  (`INFO`/`WARNING`/`CRITICAL` → info/warning/danger; `DETECTED`/`ACKNOWLEDGED`/`RESOLVED` →
+  danger/warning/success). Badges are token-based, so they are correct in light and dark mode.
+- **Rule code and Reason are hyperlinks** in Rule attribution. The rule code opens a rule-details
+  modal (name, code, category, default severity/weight, enabled, config thresholds, plus the
+  per-incident attribution); the Reason opens an "affected checks" modal. The Confidence value is a
+  colour badge (high=success, medium=warning, low=neutral).
+- **"Back to incidents" is now an `x-ui/button`** (secondary, sm). The same pattern is applied to the
+  other admin back/cancel controls: Delivery log ("Back to channels"), status-page Analytics
+  ("Back to status pages"), and the form "Cancel" links (websites, notification channels,
+  status pages, status settings).
+
+### Added
+
+- [`resources/views/components/ui/table.blade.php`](resources/views/components/ui/table.blade.php) —
+  backward-compatible `flush` prop (default `false`; every existing caller unchanged).
+- Tests: `IncidentHttpTest` coverage for section pagination, severity/status badges, the rule/reason
+  modals, and the back-button; `SharedComponentsTest` coverage for the table `flush` prop.
+
+### Notes / limitations
+
+- Per-rule `evidence` (specific affected URLs/elements) is intentionally **not** persisted on
+  `triggered_rules` ([`DetectionResult::triggeredRules()`](app/Services/Detection/DetectionResult.php)
+  drops it), so the Reason modal lists the recent checks for the incident's website in which the rule
+  fired — the closest available "affected items" evidence — and states this limitation in the UI.
+
 ## [Unreleased]
 
 ### Added — Public status page: availability-history bars + date filters + hover tooltips

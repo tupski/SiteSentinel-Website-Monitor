@@ -26,7 +26,8 @@ use Illuminate\Support\Collection;
  * The availability history (§4.3, FR-79) is expressed ONLY as per-bucket
  * availability counts/percentages — the same public-safe shape the internal
  * analytics uses. The exact `checks.duration_ms` figure is NEVER emitted
- * (§4.3: "The exact millisecond value is never emitted").
+ * (§4.3: "The exact millisecond value is never emitted"); the response-time
+ * signal is a coarse band plus a rounded millisecond figure (§4.3).
  */
 final class StatusProjector
 {
@@ -40,6 +41,9 @@ final class StatusProjector
 
         $openSeverities = $this->openSeverities($websites);
         $history = $this->availabilityHistory($websites, $period, $now);
+        // The response-time metrics are read over the SAME window as the
+        // availability history, in one batched query (never per-website).
+        $responses = $this->responseMetrics($websites, $period, $now);
 
         $services = [];
         $sortIndex = 0;
@@ -61,6 +65,15 @@ final class StatusProjector
             $band = $this->responseBand($website);
             if ($band !== null) {
                 $row['responseBand'] = $band;
+            }
+
+            // Coarse response-time signal for the public chart: a rounded
+            // millisecond figure (never the exact value) and a coarse time
+            // bucket. Omitted entirely when no timed check exists.
+            $response = $responses[$website->id] ?? null;
+            if ($response !== null) {
+                $row['responseMs'] = $response['responseMs'];
+                $row['checkedAt'] = $response['checkedAt'];
             }
 
             $perWebsite = $history[$website->id] ?? null;
@@ -191,6 +204,71 @@ final class StatusProjector
         }
 
         return $result;
+    }
+
+    /**
+     * Per-website coarse response-time metrics over the SAME window as the
+     * availability history. Returns, per website, a COARSENED millisecond
+     * figure — rounded to the nearest `response_round_ms` (default 50 ms) so
+     * the exact `checks.duration_ms` is NEVER emitted (§4.3) — plus a coarse
+     * UTC time bucket for the most recent timed check.
+     *
+     * Only websites with at least one timed check in the window appear. When a
+     * website has no timed check the key is absent, so the chart omits it
+     * rather than fabricating a bar. One batched query — never per-website.
+     *
+     * @param  Collection<int, Website>  $websites
+     * @return array<int, array{responseMs: int, checkedAt: string}>
+     */
+    private function responseMetrics(Collection $websites, string $period, Carbon $now): array
+    {
+        if ($websites->isEmpty()) {
+            return [];
+        }
+
+        $start = PublicStatusPeriod::start($period, $now);
+
+        /** @var Collection<int, Check> $checks */
+        $checks = Check::query()
+            ->whereIn('website_id', $websites->pluck('id')->all())
+            ->whereNotNull('duration_ms')
+            ->where('started_at', '>=', $start)
+            ->where('started_at', '<=', $now->copy()->setTimezone('UTC'))
+            ->orderBy('started_at')
+            ->get(['id', 'website_id', 'started_at', 'duration_ms']);
+
+        $round = max(1, (int) config('sentinel.status_page.response_round_ms', 50));
+
+        $result = [];
+        foreach ($checks as $check) {
+            $at = $check->started_at;
+            if ($at === null || $check->duration_ms === null) {
+                continue;
+            }
+
+            // `orderBy('started_at')` ascending means the last write per website
+            // is the most recent timed check. The duration is rounded to the
+            // nearest `response_round_ms` so the exact figure is never emitted.
+            $result[(int) $check->website_id] = [
+                'responseMs' => (int) (round((float) $check->duration_ms / $round) * $round),
+                'checkedAt' => $this->compactAt($at, $period),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Coarse, public-safe UTC time bucket for a check timestamp — the chart's
+     * bottom axis. Hour-granular for the 24h view, day-granular otherwise
+     * (matching {@see PublicStatusPeriod::bucketKey}). A check time can never
+     * fingerprint the detection cadence more precisely than this.
+     */
+    private function compactAt(Carbon $at, string $period): string
+    {
+        return $at->copy()->setTimezone('UTC')->format(
+            PublicStatusPeriod::resolve($period) === PublicStatusPeriod::P24H ? 'H:00' : 'Y-m-d'
+        );
     }
 
     /**
@@ -340,17 +418,8 @@ final class StatusProjector
 
         $ms = (int) $latest->duration_ms;
         $normal = (int) config('sentinel.status_page.band_normal', 800);
-        $slow = (int) config('sentinel.status_page.band_slow', 2500);
 
-        if ($ms <= $normal) {
-            return 'normal';
-        }
-
-        if ($ms <= $slow) {
-            return 'slow';
-        }
-
-        return 'slow';
+        return $ms <= $normal ? 'normal' : 'slow';
     }
 
     /**

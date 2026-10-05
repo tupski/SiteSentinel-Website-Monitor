@@ -45,16 +45,21 @@
 <div class="flex h-full min-h-0 flex-col bg-surface-elevated">
     {{-- Brand row --}}
     <div class="flex h-16 shrink-0 items-center gap-2 border-b border-border px-4">
+        @php($appName = $siteName ?? config('app.name', 'SiteSentinel'))
         <a href="{{ route('admin.dashboard') }}"
            class="flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-           title="{{ __('SiteSentinel') }}">
-            <span class="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground" aria-hidden="true">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 3 4 6v6c0 4.418 3.4 8.4 8 9 4.6-.6 8-4.582 8-9V6l-8-3Z" />
-                    <path d="M9.5 12.2l1.8 1.8 3.4-3.6" />
-                </svg>
+           title="{{ $appName }}">
+            <span class="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-md bg-primary text-primary-foreground" aria-hidden="true">
+                @if (! empty($siteLogoUrl))
+                    <img src="{{ $siteLogoUrl }}" alt="" class="h-8 w-8 object-contain">
+                @else
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3 4 6v6c0 4.418 3.4 8.4 8 9 4.6-.6 8-4.582 8-9V6l-8-3Z" />
+                        <path d="M9.5 12.2l1.8 1.8 3.4-3.6" />
+                    </svg>
+                @endif
             </span>
-            <span class="text-base font-bold tracking-tight text-text" data-sidebar-label>{{ __('SiteSentinel') }}</span>
+            <span class="truncate text-base font-bold tracking-tight text-text" data-sidebar-label>{{ $appName }}</span>
         </a>
     </div>
 

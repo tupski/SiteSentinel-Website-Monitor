@@ -10,6 +10,7 @@ use App\Models\DetectionRule;
 use App\Models\Website;
 use App\Models\WebsiteBaseline;
 use App\Models\WebsiteRuleSetting;
+use App\Services\Settings\SettingsRepository;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 
@@ -696,10 +697,13 @@ final class RuleEngine
             }
         }
 
-        $infoThreshold = max(1, (int) Config::get('sentinel.scoring.threshold_info', 1));
-        $warningThreshold = max($infoThreshold, (int) Config::get('sentinel.scoring.threshold_warning', 8));
-        $criticalThreshold = max($warningThreshold, (int) Config::get('sentinel.scoring.threshold_critical', 15));
-        $guardMin = max(1, (int) Config::get('sentinel.scoring.correlation_guard_min_categories', 2));
+        // Read through the settings accessor (ADR-035, ADR-043) so an admin
+        // edit on the Settings page is applied; falls back to the config default
+        // when no row is stored.
+        $infoThreshold = max(1, (int) settings(SettingsRepository::SCORING_THRESHOLD_INFO));
+        $warningThreshold = max($infoThreshold, (int) settings(SettingsRepository::SCORING_THRESHOLD_WARNING));
+        $criticalThreshold = max($warningThreshold, (int) settings(SettingsRepository::SCORING_THRESHOLD_CRITICAL));
+        $guardMin = max(1, (int) settings(SettingsRepository::SCORING_CORRELATION_GUARD));
 
         $guardCapped = false;
 

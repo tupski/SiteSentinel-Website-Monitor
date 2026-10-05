@@ -10,6 +10,7 @@ use App\Services\Notifications\Channels\EmailProvider;
 use App\Services\Notifications\Channels\TelegramProvider;
 use App\Services\Notifications\NotificationProviderRegistry;
 use App\Services\Settings\SettingsRepository;
+use App\Services\Settings\SettingsVersionService;
 use Illuminate\Database\Events\ModelPruningFinished;
 use Illuminate\Database\Events\ModelPruningStarting;
 use Illuminate\Database\Events\ModelsPruned;
@@ -29,6 +30,9 @@ class AppServiceProvider extends ServiceProvider
         // System settings store (ADR-035): a singleton so the resolved map is
         // memoized once per request on top of the version-counter cache.
         $this->app->singleton(SettingsRepository::class);
+
+        // Settings version control (ADR-043): snapshot/pull/rollback.
+        $this->app->singleton(SettingsVersionService::class);
 
         // Provider registry: type=>class map email/telegram. Container
         // resolution; unknown type fails closed in the dispatcher.

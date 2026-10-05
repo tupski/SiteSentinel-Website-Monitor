@@ -201,6 +201,23 @@ return [
         'absolute_timeout_minutes' => (int) env('SENTINEL_ABSOLUTE_TIMEOUT_MINUTES', 480),
     ],
 
+    /*
+    |----------------------------------------------------------------------
+    | Settings version control (ADR-043)
+    |----------------------------------------------------------------------
+    |
+    | "Pull update" never makes an outbound network call (PRD AC-23, no
+    | telemetry). When `upstream_path` points at a readable JSON file the
+    | pull applies that file (e.g. a git-tracked defaults file the operator
+    | keeps in sync themselves); otherwise it reloads the most recent stored
+    | snapshot, or the config-derived defaults on a fresh install. A snapshot
+    | of the current state is always taken first, so a pull is reversible.
+    |
+    */
+    'settings' => [
+        'upstream_path' => (string) env('SENTINEL_SETTINGS_UPSTREAM_PATH', ''),
+    ],
+
     'status_page' => [
         'ttl_floor' => (int) env('SENTINEL_STATUS_TTL_FLOOR', 60),
         'stale_multiplier' => (int) env('SENTINEL_STATUS_STALE_MULTIPLIER', 2),
@@ -210,6 +227,10 @@ return [
         'history_enabled' => (bool) env('SENTINEL_STATUS_HISTORY_ENABLED', false),
         'band_normal' => (int) env('SENTINEL_STATUS_BAND_NORMAL', 800),
         'band_slow' => (int) env('SENTINEL_STATUS_BAND_SLOW', 2500),
+        // The public response-time chart shows a COARSENED millisecond figure
+        // (rounded to this step) so the exact `checks.duration_ms` is never
+        // emitted (STATUS-PAGE.md §4.3). Override via SENTINEL_STATUS_RESPONSE_ROUND_MS.
+        'response_round_ms' => (int) env('SENTINEL_STATUS_RESPONSE_ROUND_MS', 50),
         'cache_prefix' => (string) env('SENTINEL_STATUS_CACHE_PREFIX', 'status:projection:v1'),
     ],
 ];

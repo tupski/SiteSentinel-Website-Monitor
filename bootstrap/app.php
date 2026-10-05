@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\ApplySystemSettings;
 use App\Http\Middleware\EnforceSessionTimeouts;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\ThrottleStatusUnlock;
@@ -23,6 +24,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'throttle.status-unlock' => ThrottleStatusUnlock::class,
             'session.timeouts' => EnforceSessionTimeouts::class,
         ]);
+
+        // Apply stored system settings (timezone + branding) to every web request
+        // so an admin edit is actually reflected at runtime (ADR-035, ADR-043).
+        // Appended last in the web group: it only reads settings and shares view
+        // data, so it must run after the session/auth stack is resolved.
+        $middleware->appendToGroup('web', ApplySystemSettings::class);
 
         // Redirect guests (login pages) back to login; authenticated users to the shell.
         $middleware->redirectGuestsTo(fn () => route('login'));

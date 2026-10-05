@@ -1,4 +1,10 @@
-@php use App\Support\HttpStatusCodes; @endphp
+@php
+    use App\Support\HttpStatusCodes;
+    use App\Services\Settings\SettingsRepository;
+
+    $defaultInterval = (int) settings(SettingsRepository::MONITORING_DEFAULT_INTERVAL);
+    $defaultTimeout = (int) settings(SettingsRepository::MONITORING_DEFAULT_TIMEOUT);
+@endphp
 <x-admin-layout>
     <x-slot name="title">{{ $website ? __('Edit website') : __('Add website') }} — SiteSentinel</x-slot>
 
@@ -35,14 +41,14 @@
                 <x-form.field name="check_interval_seconds" :label="__('Check interval (seconds)')" required
                               hint="{{ __('Minimum 60 seconds.') }}"
                               help="{{ __('How often the monitor probes this URL. 300s (5 minutes) is a reasonable default; shorter intervals increase load on the target. Minimum allowed is 60 seconds.') }}">
-                    <x-ui.input id="check_interval_seconds" name="check_interval_seconds" type="number" min="60" :value="old('check_interval_seconds', $website?->check_interval_seconds ?? 300)" required
+                    <x-ui.input id="check_interval_seconds" name="check_interval_seconds" type="number" min="60" :value="old('check_interval_seconds', $website?->check_interval_seconds ?? $defaultInterval)" required
                            aria-describedby="check_interval_seconds-hint" :invalid="$errors->has('check_interval_seconds')" />
                 </x-form.field>
 
                 <x-form.field name="timeout_seconds" :label="__('Timeout (seconds)')" required
                               hint="{{ __('Between 3 and 30 seconds.') }}"
                               help="{{ __('How long to wait for the response before treating the check as a failure. Must be between 3 and 30 seconds; keep it below the check interval.') }}">
-                    <x-ui.input id="timeout_seconds" name="timeout_seconds" type="number" min="3" max="30" :value="old('timeout_seconds', $website?->timeout_seconds ?? 10)" required
+                    <x-ui.input id="timeout_seconds" name="timeout_seconds" type="number" min="3" max="30" :value="old('timeout_seconds', $website?->timeout_seconds ?? $defaultTimeout)" required
                            aria-describedby="timeout_seconds-hint" :invalid="$errors->has('timeout_seconds')" />
                 </x-form.field>
 
@@ -121,7 +127,7 @@
                 <x-ui.button type="submit" variant="primary">
                     {{ $website ? __('Update') : __('Create') }}
                 </x-ui.button>
-                <a href="{{ route('admin.websites.index') }}" class="text-sm text-text-muted underline hover:text-text">{{ __('Cancel') }}</a>
+                <x-ui.button :href="route('admin.websites.index')" variant="secondary">{{ __('Cancel') }}</x-ui.button>
             </div>
         </form>
     </div>
